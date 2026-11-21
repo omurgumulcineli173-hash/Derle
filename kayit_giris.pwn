@@ -1,6 +1,6 @@
 /*
     DUKTUR RP - Ayarlar Menusu + Kalici Kayit/Giris (filterscript)
-    - Ekranin SOL ORTASINDA "AYARLAR" butonu olur. Dokununca menu acilir:
+    - Ekranin ALT ORTASINDA "AYARLAR" butonu olur. Dokununca menu acilir:
         Giris Yap / Kayit Ol / Hesap Bilgilerim / Sifre Degistir /
         Rapor Gonder / Raporlarim / Yardim / Envanter / Telefon / Admin Rapor Paneli
     - Buton calismazsa chat'e /ayarlar yaz (PC icin de bu komut var).
@@ -287,8 +287,8 @@ public OnFilterScriptInit()
     strcat(tq, "last_ip TEXT DEFAULT '', lock_until INTEGER DEFAULT 0)");
     KG_Exec(tq);
 
-    // SOL-ORTA "AYARLAR" butonu (minimap altinda, bos alan; buyuk ve parmakla basilabilir)
-    gTD = TextDrawCreate(14.0, 232.0, "~w~AYARLAR");
+    // ALT-ORTA "AYARLAR" butonu (joystick, ziplama ve diger tuslardan uzak, bos alan; buyuk ve parmakla basilabilir)
+    gTD = TextDrawCreate(282.0, 434.0, "~w~AYARLAR");
     TextDrawFont(gTD, 2);
     TextDrawLetterSize(gTD, 0.42, 1.9);
     TextDrawColor(gTD, 0xFFFFFFFF);
@@ -296,7 +296,7 @@ public OnFilterScriptInit()
     TextDrawSetProportional(gTD, 1);
     TextDrawUseBox(gTD, 1);
     TextDrawBoxColor(gTD, 0x6A1B9ACC);
-    TextDrawTextSize(gTD, 118.0, 100.0);
+    TextDrawTextSize(gTD, 382.0, 100.0);
     TextDrawSetSelectable(gTD, true);
 
     for (new i = 0; i < MAX_PLAYERS; i++)
@@ -392,7 +392,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 #if ZORUNLU_GIRIS
     if (!pLogged[playerid])
     {
-        SendClientMessage(playerid, COL_ERR, "Once giris yapmalisiniz. (Soldaki AYARLAR butonu / /ayarlar)");
+        SendClientMessage(playerid, COL_ERR, "Once giris yapmalisiniz. (Alttaki AYARLAR butonu / /ayarlar)");
         return 1;
     }
 #endif
