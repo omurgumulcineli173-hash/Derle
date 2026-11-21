@@ -16,17 +16,30 @@ jobs:
           git clone --depth 1 https://github.com/pawn-lang/samp-stdlib std2
           cp std1/*.inc include/
           cp std2/*.inc include/
+          # depoda kendi include dosyalarin varsa onlari da kullan
+          if [ -d inc ]; then cp inc/*.inc include/ 2>/dev/null || true; fi
       - name: Derle
         run: |
           LIB=$(find $PWD/pawnc-3.10.10-linux -name libpawnc.so | head -1)
           export LD_LIBRARY_PATH=$(dirname $LIB)
           PAWNCC=$(find $PWD/pawnc-3.10.10-linux -name pawncc | head -1)
+          FAIL=0
           for f in *.pwn; do
             echo "=== $f ==="
-            $PAWNCC "$f" -iinclude -Z -o"${f%.pwn}.amx" || exit 1
+            if $PAWNCC "$f" -iinclude -Z -o"${f%.pwn}.amx"; then
+              echo "OK: $f"
+            else
+              echo "HATA: $f derlenemedi"
+              FAIL=1
+            fi
           done
+          echo "--- Uretilen amx dosyalari ---"
+          ls -la *.amx || true
+          exit $FAIL
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: amx
           path: "*.amx"
+          if-no-files-found: warn
           
