@@ -275,17 +275,14 @@ public OnFilterScriptInit()
         print("[KAYIT] HATA: veritabani acilamadi!");
         return 1;
     }
-    KG_Exec("CREATE TABLE IF NOT EXISTS accounts ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "username TEXT NOT NULL UNIQUE COLLATE NOCASE,"
-        "char_name TEXT NOT NULL UNIQUE COLLATE NOCASE,"
-        "pass_hash TEXT NOT NULL,"
-        "salt TEXT NOT NULL,"
-        "age INTEGER NOT NULL,"
-        "reg_date INTEGER DEFAULT 0,"
-        "last_login INTEGER DEFAULT 0,"
-        "last_ip TEXT DEFAULT '',"
-        "lock_until INTEGER DEFAULT 0)");
+    new tq[700];
+    tq = "CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, ";
+    strcat(tq, "username TEXT NOT NULL UNIQUE COLLATE NOCASE, ");
+    strcat(tq, "char_name TEXT NOT NULL UNIQUE COLLATE NOCASE, ");
+    strcat(tq, "pass_hash TEXT NOT NULL, salt TEXT NOT NULL, age INTEGER NOT NULL, ");
+    strcat(tq, "reg_date INTEGER DEFAULT 0, last_login INTEGER DEFAULT 0, ");
+    strcat(tq, "last_ip TEXT DEFAULT '', lock_until INTEGER DEFAULT 0)");
+    KG_Exec(tq);
 
     for (new i = 0; i < MAX_PLAYERS; i++)
     {

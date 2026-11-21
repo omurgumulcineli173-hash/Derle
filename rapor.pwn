@@ -717,16 +717,17 @@ public OnFilterScriptInit()
         print("[RAPOR] HATA: veritabani acilamadi!");
         return 1;
     }
-    RP_Exec("CREATE TABLE IF NOT EXISTS reports ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "ts INTEGER, category INTEGER, priority INTEGER DEFAULT 0,"
-        "reporter TEXT, reporter_id INTEGER, target TEXT, target_id INTEGER,"
-        "reason TEXT, detail TEXT, evidence TEXT,"
-        "status INTEGER DEFAULT 0, admin TEXT DEFAULT '', result_note TEXT DEFAULT '',"
-        "closed_ts INTEGER DEFAULT 0)");
-    RP_Exec("CREATE TABLE IF NOT EXISTS report_logs ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "report_id INTEGER, ts INTEGER, admin TEXT, action TEXT, note TEXT)");
+    new tq[700];
+    tq = "CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, ";
+    strcat(tq, "ts INTEGER, category INTEGER, priority INTEGER DEFAULT 0, ");
+    strcat(tq, "reporter TEXT, reporter_id INTEGER, target TEXT, target_id INTEGER, ");
+    strcat(tq, "reason TEXT, detail TEXT, evidence TEXT, ");
+    strcat(tq, "status INTEGER DEFAULT 0, admin TEXT DEFAULT '', result_note TEXT DEFAULT '', ");
+    strcat(tq, "closed_ts INTEGER DEFAULT 0)");
+    RP_Exec(tq);
+    tq = "CREATE TABLE IF NOT EXISTS report_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ";
+    strcat(tq, "report_id INTEGER, ts INTEGER, admin TEXT, action TEXT, note TEXT)");
+    RP_Exec(tq);
     for (new i = 0; i < MAX_PLAYERS; i++)
     {
         pLastReport[i] = 0;
