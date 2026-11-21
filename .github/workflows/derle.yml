@@ -1,0 +1,23 @@
+name: derle
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Derleyici
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libc6-i386
+          wget -q https://github.com/pawn-lang/compiler/releases/download/v3.10.10/pawnc-3.10.10-linux.tar.gz
+          tar xzf pawnc-3.10.10-linux.tar.gz
+          git clone --depth 1 https://github.com/pawn-lang/samp-stdlib include
+      - name: Derle
+        run: |
+          export LD_LIBRARY_PATH=$PWD/pawnc-3.10.10-linux/lib
+          ./pawnc-3.10.10-linux/bin/pawncc oyuncu.pwn -iinclude -ooyuncu.amx
+          ./pawnc-3.10.10-linux/bin/pawncc admin.pwn -iinclude -oadmin.amx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amx
+          path: "*.amx"
