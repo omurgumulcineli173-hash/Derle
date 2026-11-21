@@ -11,8 +11,12 @@ jobs:
           sudo apt-get install -y libc6-i386
           wget -q https://github.com/pawn-lang/compiler/releases/download/v3.10.10/pawnc-3.10.10-linux.tar.gz
           tar xzf pawnc-3.10.10-linux.tar.gz
-          git clone --depth 1 https://github.com/pawn-lang/samp-stdlib include
-          find pawnc-3.10.10-linux
+          mkdir include
+          git clone --depth 1 https://github.com/pawn-lang/pawn-stdlib std1
+          git clone --depth 1 https://github.com/pawn-lang/samp-stdlib std2
+          cp std1/*.inc include/
+          cp std2/*.inc include/
+          ls include
       - name: Derle
         run: |
           LIB=$(find $PWD/pawnc-3.10.10-linux -name libpawnc.so | head -1)
