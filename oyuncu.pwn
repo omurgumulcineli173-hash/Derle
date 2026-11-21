@@ -124,7 +124,8 @@ new const Float:GpsPos[][3] =
 {
     {1177.5, -1323.9, 14.0},
     {1554.8, -1675.6, 16.2},
-    {1481.0, -1738.0, 13.5}
+    {1481.0, -1738.0, 13.5},
+    {1498.0, -1710.0, 14.0}
 };
 
 forward LoadingBitti(playerid);
@@ -719,11 +720,46 @@ stock MarketGoster(playerid)
 stock YardimGoster(playerid)
 {
     ShowPlayerDialog(playerid, D_YARDIM, DIALOG_STYLE_MSGBOX, "Yardim",
-        "Telefon sag ustte. /tel yaz = telefonu ac/kapat (dokunmatik). PC: N tusu.\nY tusu veya /envanter = Envanter\n/market = Market\n/kiyafet = Kiyafet degistir ($100)\n/karakter = Karakter degistir\n/karakterim = Karakter bilgisi",
+        "Telefon sag ustte. /tel yaz = telefonu ac/kapat (dokunmatik). PC: N tusu.\nY tusu veya /envanter = Envanter\n/market = Market\n/kiyafet = Kiyafet degistir ($100)\n/karakter = Karakter degistir\n/karakterim = Karakter bilgisi\n/galeri = Arac galerisi\n/araclarim = Garaj\n/kilit /motor /far /bagaj /kaput = Arac kontrol",
         "Tamam", "");
 }
 
 // ---------------------------------------------------------------- callback'ler
+
+// ---------------------------------------------------------------- diger filterscript'ler icin (galeri vb.)
+
+forward OyuncuDurum(playerid);
+forward OyuncuSlot(playerid);
+forward OyuncuPara(playerid);
+forward OyuncuParaEkle(playerid, miktar);
+
+public OyuncuDurum(playerid)
+{
+    if(playerid < 0 || playerid >= MAX_PLAYERS) return 0;
+    return PI[playerid][pDurum];
+}
+
+public OyuncuSlot(playerid)
+{
+    if(playerid < 0 || playerid >= MAX_PLAYERS) return 0;
+    return PI[playerid][pSlot];
+}
+
+public OyuncuPara(playerid)
+{
+    if(playerid < 0 || playerid >= MAX_PLAYERS) return 0;
+    return PI[playerid][pPara];
+}
+
+public OyuncuParaEkle(playerid, miktar)
+{
+    if(playerid < 0 || playerid >= MAX_PLAYERS) return 0;
+    if(PI[playerid][pDurum] != 3) return 0;
+    if(PI[playerid][pPara] + miktar < 0) return 0;
+    AddMoney(playerid, miktar);
+    CharKaydet(playerid);
+    return 1;
+}
 
 public OnFilterScriptInit()
 {
@@ -925,7 +961,7 @@ public OnPlayerClickTextDraw(playerid, Text:clickedid)
         {
             TelKapat(playerid);
             ShowPlayerDialog(playerid, D_GPS, DIALOG_STYLE_LIST, "GPS",
-                "Hastane\nPolis Departmani\nPershing Square\nGPS Kapat", "Git", "Kapat");
+                "Hastane\nPolis Departmani\nPershing Square\nArac Galerisi\nGPS Kapat", "Git", "Kapat");
             return 1;
         }
         if(clickedid == TdTelSMS)
@@ -1077,7 +1113,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         case D_GPS:
         {
             if(!response) return 1;
-            if(listitem < 3)
+            if(listitem < 4)
             {
                 SetPlayerCheckpoint(playerid, GpsPos[listitem][0], GpsPos[listitem][1], GpsPos[listitem][2], 5.0);
                 SendClientMessage(playerid, 0x3498DBFF, "GPS hedefi haritada isaretlendi.");
