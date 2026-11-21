@@ -12,11 +12,14 @@ jobs:
           wget -q https://github.com/pawn-lang/compiler/releases/download/v3.10.10/pawnc-3.10.10-linux.tar.gz
           tar xzf pawnc-3.10.10-linux.tar.gz
           git clone --depth 1 https://github.com/pawn-lang/samp-stdlib include
+          find pawnc-3.10.10-linux
       - name: Derle
         run: |
-          export LD_LIBRARY_PATH=$PWD/pawnc-3.10.10-linux/lib
-          ./pawnc-3.10.10-linux/bin/pawncc oyuncu.pwn -iinclude -ooyuncu.amx
-          ./pawnc-3.10.10-linux/bin/pawncc admin.pwn -iinclude -oadmin.amx
+          LIB=$(find $PWD/pawnc-3.10.10-linux -name libpawnc.so | head -1)
+          export LD_LIBRARY_PATH=$(dirname $LIB)
+          PAWNCC=$(find $PWD/pawnc-3.10.10-linux -name pawncc | head -1)
+          $PAWNCC oyuncu.pwn -iinclude -Z -ooyuncu.amx
+          $PAWNCC admin.pwn -iinclude -Z -oadmin.amx
       - uses: actions/upload-artifact@v4
         with:
           name: amx
