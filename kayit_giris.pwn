@@ -231,19 +231,6 @@ stock KG_ShowRegAge(playerid)
 
 stock KG_Complete(playerid, accid, const charname[], age)
 {
-    new cur[MAX_PLAYER_NAME + 1];
-    GetPlayerName(playerid, cur, sizeof cur);
-
-    if (strcmp(cur, charname, false))
-    {
-        if (SetPlayerName(playerid, charname) == -1)
-        {
-            SendClientMessage(playerid, COL_ERR, "Karakter adiniz su an baska bir oyuncu tarafindan kullaniliyor. Lutfen tekrar deneyin.");
-            KG_KickDelay(playerid);
-            return 0;
-        }
-    }
-
     pLogged[playerid] = 1;
     pAccID[playerid] = accid;
     pAge[playerid] = age;
@@ -258,8 +245,7 @@ stock KG_Complete(playerid, accid, const charname[], age)
     format(msg, sizeof msg, "Hos geldin, %s! Basariyla giris yaptin.", charname);
     SendClientMessage(playerid, COL_OK, msg);
 
-    SetSpawnInfo(playerid, NO_TEAM, SPAWN_SKIN, SPAWN_X, SPAWN_Y, SPAWN_Z, SPAWN_A, 0, 0, 0, 0, 0, 0);
-    TogglePlayerSpectating(playerid, 0);
+    TogglePlayerControllable(playerid, 1);
 
     CallRemoteFunction("OnPlayerAccountLogin", "i", playerid);
     return 1;
@@ -312,27 +298,45 @@ public OnPlayerDisconnect(playerid, reason)
     return 1;
 }
 
-public KG_Start(playerid)
+// Hesap varsa giris ekrani, yoksa (oyuncunun SA-MP adiyla) kayit ekrani
+stock KG_Prompt(playerid)
 {
-    if (!IsPlayerConnected(playerid) || pLogged[playerid]) return 0;
-    TogglePlayerSpectating(playerid, 1);
-
     new name[MAX_PLAYER_NAME + 1];
     GetPlayerName(playerid, name, sizeof name);
     if (KG_FindUser(name, pTmpUser[playerid], 25))
     {
-        KG_ShowLogin(playerid);   // kayitli oyuncu: yalnizca sifre
+        KG_ShowLogin(playerid);
     }
     else
     {
-        KG_ShowUser(playerid);
+        format(pTmpUser[playerid], 25, "%s", name);
+        KG_ShowRegPass(playerid);
     }
     return 1;
 }
 
-public OnPlayerRequestSpawn(playerid)
+public KG_Start(playerid)
 {
-    if (!pLogged[playerid]) return 0;
+    if (!IsPlayerConnected(playerid) || pLogged[playerid]) return 0;
+    KG_Prompt(playerid);
+    return 1;
+}
+
+forward KG_PromptTimer(playerid);
+public KG_PromptTimer(playerid)
+{
+    if (IsPlayerConnected(playerid) && !pLogged[playerid]) KG_Prompt(playerid);
+    return 1;
+}
+
+// Eski oyuncu sistemi karakteri olusturup spawn edince giris ekranini tekrar ac
+public OnPlayerSpawn(playerid)
+{
+    if (!pLogged[playerid])
+    {
+        TogglePlayerControllable(playerid, 0);
+        SetTimerEx("KG_PromptTimer", 800, false, "i", playerid);
+    }
     return 1;
 }
 
@@ -457,7 +461,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 
         case DLG_REGPASS:
         {
-            if (!response) { KG_ShowUser(playerid); return 1; }
+            if (!response) { KG_KickDelay(playerid); return 1; }
             new len = strlen(inputtext);
             if (len < MIN_PASS || len > 32)
             {
@@ -482,64 +486,26 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
             KG_MakeSalt(pTmpSalt[playerid]);
             SHA256_PassHash(pTmpPlain[playerid], pTmpSalt[playerid], pTmpHash[playerid], 65);
             pTmpPlain[playerid][0] = 0;
-            KG_ShowRegChar(playerid);
-            return 1;
-        }
 
-        case DLG_REGCHAR:
-        {
-            if (!response) { KG_ShowRegPass(playerid); return 1; }
-            new name[32];
-            strmid(name, inputtext, 0, 31, sizeof name);
-            if (!KG_ValidName(name))
+            // kullanici adi baskasi tarafindan alinmis mi (son kontrol)
+            if (KG_NameTaken(pTmpUser[playerid], playerid))
             {
-                SendClientMessage(playerid, COL_ERR, "Gecersiz karakter adi (3-20 karakter; harf, rakam ve _ kullanin).");
-                KG_ShowRegChar(playerid);
-                return 1;
-            }
-            if (KG_NameTaken(name, playerid))
-            {
-                SendClientMessage(playerid, COL_ERR, "Bu isim daha once alinmis veya su an kullaniliyor. Baska bir isim secin.");
-                KG_ShowRegChar(playerid);
-                return 1;
-            }
-            format(pTmpChar[playerid], 25, "%s", name);
-            KG_ShowRegAge(playerid);
-            return 1;
-        }
-
-        case DLG_REGAGE:
-        {
-            if (!response) { KG_ShowRegChar(playerid); return 1; }
-            new age = strval(inputtext);
-            if (age < MIN_AGE || age > MAX_AGE)
-            {
-                SendClientMessage(playerid, COL_ERR, "Gecersiz yas.");
-                KG_ShowRegAge(playerid);
+                SendClientMessage(playerid, COL_ERR, "Bu isim kayitli veya kullanimda. Baska bir isimle baglanin.");
+                KG_KickDelay(playerid);
                 return 1;
             }
 
-            // son kontrol (yaris durumu): isim hala bos mu?
-            if (KG_NameTaken(pTmpChar[playerid], playerid) || KG_NameTaken(pTmpUser[playerid], playerid))
-            {
-                SendClientMessage(playerid, COL_ERR, "Bu isim bu sirada baskasi tarafindan alindi. Yeniden deneyin.");
-                KG_ShowUser(playerid);
-                return 1;
-            }
-
-            new eu[64], ec[64], ip[20], q[600];
+            new eu[64], ip[20], q[600];
             KG_Esc(pTmpUser[playerid], eu);
-            KG_Esc(pTmpChar[playerid], ec);
             GetPlayerIp(playerid, ip, sizeof ip);
-            format(q, sizeof q, "INSERT INTO accounts (username, char_name, pass_hash, salt, age, reg_date, last_login, last_ip) VALUES ('%s','%s','%s','%s',%d,%d,%d,'%s')",
-                eu, ec, pTmpHash[playerid], pTmpSalt[playerid], age, gettime(), gettime(), ip);
+            format(q, sizeof q, "INSERT INTO accounts (username, char_name, pass_hash, salt, age, reg_date, last_login, last_ip) VALUES ('%s','%s','%s','%s',0,%d,%d,'%s')",
+                eu, eu, pTmpHash[playerid], pTmpSalt[playerid], gettime(), gettime(), ip);
             if (!KG_Exec(q))
             {
-                SendClientMessage(playerid, COL_ERR, "Kayit basarisiz oldu (isim kullanimda olabilir). Tekrar deneyin.");
-                KG_ShowUser(playerid);
+                SendClientMessage(playerid, COL_ERR, "Kayit basarisiz oldu. Tekrar deneyin.");
+                KG_ShowRegPass(playerid);
                 return 1;
             }
-
             format(q, sizeof q, "SELECT id FROM accounts WHERE username='%s' COLLATE NOCASE", eu);
             new DBResult:r = db_query(gDB, q), accid = 0, tmp[16];
             if (r)
@@ -553,14 +519,12 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
                 KG_KickDelay(playerid);
                 return 1;
             }
-
-            SendClientMessage(playerid, COL_OK, "Kayit tamamlandi! Hesabiniz kalici olarak kaydedildi.");
-            new charname[25];
-            format(charname, sizeof charname, "%s", pTmpChar[playerid]);
             pTmpHash[playerid][0] = 0;
-            KG_Complete(playerid, accid, charname, age);
+            SendClientMessage(playerid, COL_OK, "Kayit tamamlandi! Hesabiniz kalici olarak kaydedildi.");
+            KG_Complete(playerid, accid, pTmpUser[playerid], 0);
             return 1;
         }
+
     }
     return 0;
 }
