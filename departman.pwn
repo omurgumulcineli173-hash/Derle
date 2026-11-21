@@ -712,6 +712,17 @@ stock HaberDetay(id, dest[], size)
     }
 }
 
+stock BroadcastHaber(tur, baslik[])
+{
+    new s[160];
+    if(tur == 2) format(s, sizeof s, "[SON DAKIKA] %s", baslik);
+    else if(tur == 3) format(s, sizeof s, "[CANLI YAYIN] %s", baslik);
+    else if(tur == 4) format(s, sizeof s, "[ETKINLIK] %s", baslik);
+    else return 0;
+    SendClientMessageToAll(0x9B59B6FF, s);
+    return 1;
+}
+
 stock SaveHaber(playerid)
 {
     new q[600], t[24], n[MAX_PLAYER_NAME], bs[128], mt[128], durum, herkes, tur = PTmp[playerid];
@@ -727,17 +738,6 @@ stock SaveHaber(playerid)
     if(durum == 1) BroadcastHaber(tur, bs);
     else SendClientMessage(playerid, C_INF, "Haberin onay icin medya yonetimine gonderildi.");
     if(durum == 1) SendClientMessage(playerid, C_OK, "Haber yayinlandi.");
-}
-
-stock BroadcastHaber(tur, baslik[])
-{
-    new s[160];
-    if(tur == 2) format(s, sizeof s, "[SON DAKIKA] %s", baslik);
-    else if(tur == 3) format(s, sizeof s, "[CANLI YAYIN] %s", baslik);
-    else if(tur == 4) format(s, sizeof s, "[ETKINLIK] %s", baslik);
-    else return 0;
-    SendClientMessageToAll(0x9B59B6FF, s);
-    return 1;
 }
 
 stock ShowHaberFeed(playerid)
@@ -910,7 +910,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if(!strcmp(cmdtext, "/gorev", true))
     {
-        if(PDep[playerid] < 0) return SendClientMessage(playerid, C_ERR, "Departman personeli degilsin."), 1;
+        if(PDep[playerid] < 0) { SendClientMessage(playerid, C_ERR, "Departman personeli degilsin."); return 1; }
         PDuty[playerid] = !PDuty[playerid];
         format(s, sizeof s, "Gorev durumu: %s", PDuty[playerid] ? "AKTIF" : "PASIF");
         SendClientMessage(playerid, PDuty[playerid] ? C_OK : C_INF, s);
@@ -920,8 +920,8 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if(!strcmp(cmdtext, "/d ", true, 3))
     {
-        if(PDep[playerid] < 0) return SendClientMessage(playerid, C_ERR, "Departman personeli degilsin."), 1;
-        if(!cmdtext[3]) return SendClientMessage(playerid, C_INF, "Kullanim: /d [mesaj]"), 1;
+        if(PDep[playerid] < 0) { SendClientMessage(playerid, C_ERR, "Departman personeli degilsin."); return 1; }
+        if(!cmdtext[3]) { SendClientMessage(playerid, C_INF, "Kullanim: /d [mesaj]"); return 1; }
         format(s, sizeof s, "[%s] %s %s: %s", DepName[PDep[playerid]], RankName[PDep[playerid]][PRank[playerid] - 1], n, cmdtext[3]);
         SendDep(PDep[playerid], DepColor[PDep[playerid]], s);
         return 1;
@@ -944,7 +944,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if(!strcmp(cmdtext, "/ihbar ", true, 7))
     {
-        if(!cmdtext[7]) return SendClientMessage(playerid, C_INF, "Kullanim: /ihbar [mesaj]"), 1;
+        if(!cmdtext[7]) { SendClientMessage(playerid, C_INF, "Kullanim: /ihbar [mesaj]"); return 1; }
         InsertRec(2, 1, n, n, cmdtext[7]);
         format(s, sizeof s, "[IHBAR] %s (ID:%d): %s", n, playerid, cmdtext[7]);
         SendDep(2, 0x3498DBFF, s);
@@ -954,7 +954,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if(!strcmp(cmdtext, "/acil ", true, 6))
     {
-        if(!cmdtext[6]) return SendClientMessage(playerid, C_INF, "Kullanim: /acil [mesaj]"), 1;
+        if(!cmdtext[6]) { SendClientMessage(playerid, C_INF, "Kullanim: /acil [mesaj]"); return 1; }
         InsertRec(3, 3, n, n, cmdtext[6]);
         format(s, sizeof s, "[ACIL CAGRI] %s (ID:%d): %s", n, playerid, cmdtext[6]);
         SendDep(3, 0xE74C3CFF, s);
@@ -964,7 +964,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if(!strcmp(cmdtext, "/sikayet ", true, 9))
     {
-        if(!cmdtext[9]) return SendClientMessage(playerid, C_INF, "Kullanim: /sikayet [mesaj]"), 1;
+        if(!cmdtext[9]) { SendClientMessage(playerid, C_INF, "Kullanim: /sikayet [mesaj]"); return 1; }
         InsertRec(0, 2, n, n, cmdtext[9]);
         SendClientMessage(playerid, C_OK, "Sikayetin belediyeye iletildi.");
         return 1;
@@ -972,13 +972,13 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if(!strcmp(cmdtext, "/departmanver", true, 13))
     {
-        if(!IsPlayerAdmin(playerid)) return SendClientMessage(playerid, C_ERR, "Bu komut sadece RCON admin icindir."), 1;
+        if(!IsPlayerAdmin(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece RCON admin icindir."); return 1; }
         new idx = 13, a[16], b[16], c[16];
         Token(cmdtext, idx, a); Token(cmdtext, idx, b); Token(cmdtext, idx, c);
-        if(!a[0] || !b[0] || !c[0]) return SendClientMessage(playerid, C_INF, "Kullanim: /departmanver [id] [dep 0-4] [rutbe 1-5]  (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya)"), 1;
+        if(!a[0] || !b[0] || !c[0]) { SendClientMessage(playerid, C_INF, "Kullanim: /departmanver [id] [dep 0-4] [rutbe 1-5]  (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya)"); return 1; }
         new t = strval(a), d = strval(b), r = strval(c);
-        if(t < 0 || t >= MAX_PLAYERS || !IsPlayerConnected(t)) return SendClientMessage(playerid, C_ERR, "Oyuncu bulunamadi."), 1;
-        if(d < 0 || d >= MAX_DEP || r < 1 || r > MAX_RANK) return SendClientMessage(playerid, C_ERR, "Gecersiz departman/rutbe."), 1;
+        if(t < 0 || t >= MAX_PLAYERS || !IsPlayerConnected(t)) { SendClientMessage(playerid, C_ERR, "Oyuncu bulunamadi."); return 1; }
+        if(d < 0 || d >= MAX_DEP || r < 1 || r > MAX_RANK) { SendClientMessage(playerid, C_ERR, "Gecersiz departman/rutbe."); return 1; }
         SetMember(t, d, r);
         SendClientMessage(playerid, C_OK, "Islem tamamlandi.");
         return 1;
@@ -1181,7 +1181,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         }
         else if(listitem == 2)
         {
-            if(PRank[playerid] < MAX_RANK) return SendClientMessage(playerid, C_ERR, "Butceden para cekmek sadece mudur yetkisindedir."), 1;
+            if(PRank[playerid] < MAX_RANK) { SendClientMessage(playerid, C_ERR, "Butceden para cekmek sadece mudur yetkisindedir."); return 1; }
             PAct[playerid] = 2;
             ShowPlayerDialog(playerid, D_BUTCEMIKTAR, DIALOG_STYLE_INPUT, "Para Cek", "Cekilecek miktar:", "Onayla", "Geri");
         }
@@ -1193,10 +1193,10 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         if(!response) { OpenTablet(playerid); return 1; }
         if(!IsYonetici(playerid)) return 1;
         new amt = strval(buf);
-        if(amt <= 0 || amt > 10000000) return SendClientMessage(playerid, C_ERR, "Gecersiz miktar."), 1;
+        if(amt <= 0 || amt > 10000000) { SendClientMessage(playerid, C_ERR, "Gecersiz miktar."); return 1; }
         if(PAct[playerid] == 1)
         {
-            if(GetPlayerMoney(playerid) < amt) return SendClientMessage(playerid, C_ERR, "Yeterli paran yok."), 1;
+            if(GetPlayerMoney(playerid) < amt) { SendClientMessage(playerid, C_ERR, "Yeterli paran yok."); return 1; }
             GivePlayerMoney(playerid, -amt);
             format(q, sizeof q, "UPDATE butce SET miktar=miktar+%d WHERE dep=%d", amt, d);
             DbExec(q);
@@ -1207,7 +1207,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         {
             if(PRank[playerid] < MAX_RANK) return 1;
             format(q, sizeof q, "SELECT miktar FROM butce WHERE dep=%d", d);
-            if(DbGetInt(q) < amt) return SendClientMessage(playerid, C_ERR, "Butcede yeterli para yok."), 1;
+            if(DbGetInt(q) < amt) { SendClientMessage(playerid, C_ERR, "Butcede yeterli para yok."); return 1; }
             format(q, sizeof q, "UPDATE butce SET miktar=miktar-%d WHERE dep=%d", amt, d);
             DbExec(q);
             GivePlayerMoney(playerid, amt);
@@ -1263,16 +1263,16 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
             return 1;
         }
         t = ResolveTarget(inputtext);
-        if(t == INVALID_PLAYER_ID) return SendClientMessage(playerid, C_ERR, "Oyuncu bulunamadi."), 1;
+        if(t == INVALID_PLAYER_ID) { SendClientMessage(playerid, C_ERR, "Oyuncu bulunamadi."); return 1; }
         if(act == 1)
         {
-            if(PDep[t] >= 0) return SendClientMessage(playerid, C_ERR, "Oyuncu zaten bir departmanda."), 1;
+            if(PDep[t] >= 0) { SendClientMessage(playerid, C_ERR, "Oyuncu zaten bir departmanda."); return 1; }
             SetMember(t, d, 1);
             SendClientMessage(playerid, C_OK, "Oyuncu departmana alindi.");
             return 1;
         }
-        if(PDep[t] != d) return SendClientMessage(playerid, C_ERR, "Oyuncu senin departmanindan degil."), 1;
-        if(t == playerid || PRank[t] >= PRank[playerid]) return SendClientMessage(playerid, C_ERR, "Kendi rutbenle esit veya ustu birine islem yapamazsin."), 1;
+        if(PDep[t] != d) { SendClientMessage(playerid, C_ERR, "Oyuncu senin departmanindan degil."); return 1; }
+        if(t == playerid || PRank[t] >= PRank[playerid]) { SendClientMessage(playerid, C_ERR, "Kendi rutbenle esit veya ustu birine islem yapamazsin."); return 1; }
         PTarget[playerid] = t;
         switch(act)
         {
@@ -1295,7 +1295,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
             }
             case 4:
             {
-                if(PRank[t] + 1 >= PRank[playerid]) return SendClientMessage(playerid, C_ERR, "Bu oyuncuyu daha fazla terfi ettiremezsin."), 1;
+                if(PRank[t] + 1 >= PRank[playerid]) { SendClientMessage(playerid, C_ERR, "Bu oyuncuyu daha fazla terfi ettiremezsin."); return 1; }
                 SetRank(t, PRank[t] + 1);
                 SendClientMessage(playerid, C_OK, "Oyuncu terfi ettirildi.");
             }
@@ -1322,7 +1322,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         if(!response || !IsYonetici(playerid)) return 1;
         new t = PTarget[playerid], m = strval(buf);
         if(!IsPlayerConnected(t) || PDep[t] != d || PRank[t] >= PRank[playerid]) return 1;
-        if(m < 0 || m > 50000) return SendClientMessage(playerid, C_ERR, "Maas 0 ile 50000 arasinda olmali."), 1;
+        if(m < 0 || m > 50000) { SendClientMessage(playerid, C_ERR, "Maas 0 ile 50000 arasinda olmali."); return 1; }
         PMaas[t] = m;
         UpdateMember(t);
         GetPlayerName(t, n, sizeof n);
@@ -1466,7 +1466,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         GetPart(buf, 0, pl, sizeof pl);
         GetPart(buf, 1, sh, sizeof sh);
         GetPart(buf, 2, md, sizeof md);
-        if(!pl[0] || !sh[0]) return SendClientMessage(playerid, C_ERR, "Format: PLAKA, SAHIP ADI, MODEL"), 1;
+        if(!pl[0] || !sh[0]) { SendClientMessage(playerid, C_ERR, "Format: PLAKA, SAHIP ADI, MODEL"); return 1; }
         TimeStr(t);
         format(q, sizeof q, "INSERT OR REPLACE INTO araclar (plaka,sahip,model,tarih) VALUES ('%s','%s','%s','%s')", pl, sh, md, t);
         DbExec(q);
