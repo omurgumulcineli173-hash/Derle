@@ -1,9 +1,10 @@
 /*
     DUKTUR RP - Ayarlar Menusu + Kalici Kayit/Giris (filterscript)
-    - Ekranin ALT ORTASINDA "AYARLAR" butonu olur. Dokununca menu acilir:
+    - Buton yok. Menu sadece /ayarlar komutuyla acilir.
+    - Oyuna girince ustte 12 sn hosgeldin yazisi + chat'te /yardim ve /ayarlar bilgisi cikar.
+    - Menu icerigi:
         Giris Yap / Kayit Ol / Hesap Bilgilerim / Sifre Degistir /
         Rapor Gonder / Raporlarim / Yardim / Envanter / Telefon / Admin Rapor Paneli
-    - Buton calismazsa chat'e /ayarlar yaz (PC icin de bu komut var).
     - SQLite (duktur_rp.db) - ek plugin gerekmez. SHA256 + salt. 3 yanlis sifre = 5 dk kilit.
     - Kullanici adi = oyuncunun SA-MP adi. Isim koruma: online + tum kayitli hesaplar, buyuk/kucuk harf duyarsiz.
     - ZORUNLU_GIRIS 1 yaparsan giris yapmayan oyuncu hareket edemez/yazamaz/komut kullanamaz.
@@ -50,6 +51,7 @@ new pTmpSalt[MAX_PLAYERS][17];
 forward KG_Start(playerid);
 forward KG_Kick(playerid);
 forward KG_PromptTimer(playerid);
+forward KG_HideWelcome(playerid);
 forward KG_IsLogged(playerid);
 forward KG_GetAccountID(playerid);
 
@@ -287,24 +289,20 @@ public OnFilterScriptInit()
     strcat(tq, "last_ip TEXT DEFAULT '', lock_until INTEGER DEFAULT 0)");
     KG_Exec(tq);
 
-    // ALT-ORTA "AYARLAR" butonu (joystick, ziplama ve diger tuslardan uzak, bos alan; buyuk ve parmakla basilabilir)
-    gTD = TextDrawCreate(282.0, 434.0, "~w~AYARLAR");
-    TextDrawFont(gTD, 2);
-    TextDrawLetterSize(gTD, 0.42, 1.9);
+    // Ust ortada gecici hosgeldin yazisi (buton YOK; menu sadece /ayarlar ile acilir)
+    gTD = TextDrawCreate(320.0, 8.0, "~y~DUKTUR RP'ye Hosgeldin!~n~~w~Yardim icin ~g~/yardim~w~  -  Giris / Kayit icin ~g~/ayarlar");
+    TextDrawAlignment(gTD, 2);
+    TextDrawFont(gTD, 1);
+    TextDrawLetterSize(gTD, 0.32, 1.4);
     TextDrawColor(gTD, 0xFFFFFFFF);
     TextDrawSetOutline(gTD, 1);
     TextDrawSetProportional(gTD, 1);
-    TextDrawUseBox(gTD, 1);
-    TextDrawBoxColor(gTD, 0x6A1B9ACC);
-    TextDrawTextSize(gTD, 382.0, 100.0);
-    TextDrawSetSelectable(gTD, true);
 
     for (new i = 0; i < MAX_PLAYERS; i++)
     {
         KG_ResetPlayer(i);
         if (IsPlayerConnected(i))
         {
-            TextDrawShowForPlayer(i, gTD);
 #if ZORUNLU_GIRIS
             SetTimerEx("KG_PromptTimer", 500, false, "i", i);
 #endif
@@ -324,7 +322,6 @@ public OnFilterScriptExit()
 public OnPlayerConnect(playerid)
 {
     KG_ResetPlayer(playerid);
-    TextDrawShowForPlayer(playerid, gTD);
 #if ZORUNLU_GIRIS
     SetTimerEx("KG_PromptTimer", 1500, false, "i", playerid);
 #endif
@@ -350,26 +347,26 @@ public KG_Start(playerid)
 
 public OnPlayerSpawn(playerid)
 {
+    // Hosgeldin yazisi (ust) + chat mesaji, 12 sn sonra yazi kaybolur
+    TextDrawShowForPlayer(playerid, gTD);
+    SetTimerEx("KG_HideWelcome", 12000, false, "i", playerid);
+    SendClientMessage(playerid, COL_INFO, "DUKTUR RP'ye hosgeldin! Yardim icin /yardim yaz.");
+    if (!pLogged[playerid])
+        SendClientMessage(playerid, COL_INFO, "Giris yapmak / kayit olmak icin /ayarlar yaz.");
 #if ZORUNLU_GIRIS
     if (!pLogged[playerid])
     {
         TogglePlayerControllable(playerid, 0);
         SetTimerEx("KG_PromptTimer", 800, false, "i", playerid);
     }
-#else
-    #pragma unused playerid
 #endif
     return 1;
 }
 
-public OnPlayerClickTextDraw(playerid, Text:clickedid)
+public KG_HideWelcome(playerid)
 {
-    if (clickedid == gTD)
-    {
-        KG_ShowMenu(playerid);
-        return 1;
-    }
-    return 0;
+    if (IsPlayerConnected(playerid)) TextDrawHideForPlayer(playerid, gTD);
+    return 1;
 }
 
 public OnPlayerText(playerid, text[])
@@ -392,7 +389,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 #if ZORUNLU_GIRIS
     if (!pLogged[playerid])
     {
-        SendClientMessage(playerid, COL_ERR, "Once giris yapmalisiniz. (Alttaki AYARLAR butonu / /ayarlar)");
+        SendClientMessage(playerid, COL_ERR, "Once giris yapmalisiniz. (/ayarlar)");
         return 1;
     }
 #endif
