@@ -306,6 +306,7 @@ stock DBInit()
     DbExec("CREATE TABLE IF NOT EXISTS gecmis (id INTEGER PRIMARY KEY AUTOINCREMENT, dep INTEGER, isim TEXT, olay TEXT, tarih TEXT)");
     DbExec("CREATE TABLE IF NOT EXISTS butce (dep INTEGER PRIMARY KEY, miktar INTEGER)");
     DbExec("CREATE TABLE IF NOT EXISTS haberler (id INTEGER PRIMARY KEY AUTOINCREMENT, baslik TEXT, metin TEXT, yazar TEXT, durum INTEGER, herkes INTEGER, tur INTEGER, tarih TEXT)");
+    DbExec("CREATE TABLE IF NOT EXISTS konumlar (isim TEXT PRIMARY KEY, x REAL, y REAL, z REAL, a REAL)");
     DbExec("CREATE TABLE IF NOT EXISTS araclar (plaka TEXT PRIMARY KEY, sahip TEXT, model TEXT, tarih TEXT)");
     new q[100];
     for(new d = 0; d < MAX_DEP; d++)
@@ -329,11 +330,30 @@ stock AddLoc(dep, name[], pub, Float:ox, Float:oy, Float:oz, Float:oa, Float:ix,
     format(LocName[i], 32, "%s", name);
     LocOut[i][0] = ox; LocOut[i][1] = oy; LocOut[i][2] = oz; LocOut[i][3] = oa;
     LocIn[i][0] = ix; LocIn[i][1] = iy; LocIn[i][2] = iz; LocIn[i][3] = ia;
-    LocPickO[i] = CreatePickup(1318, 1, ox, oy, oz, 0);
+    {
+        new qq[160], nm[32], fx[24], DBResult:rr;
+        format(nm, sizeof nm, "%s", name);
+        Esc(nm);
+        format(qq, sizeof qq, "SELECT x,y,z,a FROM konumlar WHERE isim='%s'", nm);
+        rr = db_query(gDB, qq);
+        if(rr)
+        {
+            if(db_num_rows(rr))
+            {
+                for(new k = 0; k < 4; k++)
+                {
+                    db_get_field(rr, k, fx, sizeof fx);
+                    LocOut[i][k] = float(strval(fx)) / 1000.0;
+                }
+            }
+            db_free_result(rr);
+        }
+    }
+    LocPickO[i] = CreatePickup(1318, 1, LocOut[i][0], LocOut[i][1], LocOut[i][2], 0);
     LocPickI[i] = CreatePickup(1318, 1, ix, iy, iz, i + 1);
     new lbl[80];
     format(lbl, sizeof lbl, "%s\n%s", name, pub ? "Herkese Acik" : "Sadece Personel");
-    Create3DTextLabel(lbl, DepColor[dep], ox, oy, oz + 0.8, 20.0, 0, 0);
+    Create3DTextLabel(lbl, DepColor[dep], LocOut[i][0], LocOut[i][1], LocOut[i][2] + 0.8, 20.0, 0, 0);
     Create3DTextLabel("CIKIS", 0xFFFFFFFF, ix, iy, iz + 0.8, 10.0, i + 1, 0);
     return i;
 }
@@ -780,10 +800,10 @@ public OnFilterScriptInit()
     // AddLoc(dep, "isim", herkese_acik, giris_x,y,z,aci, ic_x,y,z,aci, interior_id)
     // NOT: Asagidakiler ORNEK koordinatlardir. Kendi mekanlarini buraya ekle/degistir.
     AddLoc(0, "Belediye Binasi", 1, 1481.0, -1768.3, 18.8, 0.0, 389.8, 173.8, 1008.4, 90.0, 3);
-    AddLoc(1, "FBI Merkezi", 0, 1464.1, -1010.2, 26.8, 180.0, 246.4, 110.8, 1003.2, 0.0, 10);
+    AddLoc(1, "FBI Merkezi", 0, 1492.0, -1768.3, 18.8, 0.0, 246.4, 110.8, 1003.2, 0.0, 10);
     AddLoc(2, "LSPD Merkezi", 1, 1554.7, -1675.6, 16.2, 90.0, 246.7, 63.9, 1003.6, 0.0, 6);
     AddLoc(3, "All Saints Hastanesi", 1, 1177.9, -1323.9, 14.0, 270.0, 288.7, 169.3, 1007.2, 0.0, 3);
-    AddLoc(4, "Medya Merkezi (NEWS)", 1, 1031.0, -1133.0, 23.9, 0.0, 288.7, 169.3, 1007.2, 0.0, 3);
+    AddLoc(4, "Medya Merkezi (NEWS)", 1, 1470.0, -1768.3, 18.8, 0.0, 288.7, 169.3, 1007.2, 0.0, 3);
 
     SetTimer("MaasVer", MAAS_SURE_DK * 60 * 1000, true);
     SetTimer("PanelYenile", 30000, true);
@@ -934,7 +954,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
         l[0] = 0;
         for(new i = 0; i < LocCount; i++)
         {
-            format(t, sizeof t, "%s%s {FFFFFF}- %s\n", DepEmbed[LocDep[i]], DepName[LocDep[i]], LocName[i]);
+            format(t, sizeof t, "%s[%d] %s {FFFFFF}- %s\n", DepEmbed[LocDep[i]], i, DepName[LocDep[i]], LocName[i]);
             strcat(l, t, sizeof l);
         }
         ShowPlayerDialog(playerid, D_MEKANLIST, DIALOG_STYLE_LIST, "Mekanlar (sec: haritada isaretle)", l, "Isaretle", "Kapat");
@@ -968,6 +988,25 @@ public OnPlayerCommandText(playerid, cmdtext[])
         if(!cmdtext[9]) { SendClientMessage(playerid, C_INF, "Kullanim: /sikayet [mesaj]"); return 1; }
         InsertRec(0, 2, n, n, cmdtext[9]);
         SendClientMessage(playerid, C_OK, "Sikayetin belediyeye iletildi.");
+        return 1;
+    }
+
+    if(!strcmp(cmdtext, "/mekankonum", true, 11))
+    {
+        if(!IsPlayerAdmin(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece RCON admin icindir."); return 1; }
+        new idx = 11, a[8];
+        Token(cmdtext, idx, a);
+        if(!a[0]) { SendClientMessage(playerid, C_INF, "Kullanim: /mekankonum [mekan no]  (numaralar /mekanlar listesinde)"); return 1; }
+        new lc = strval(a);
+        if(lc < 0 || lc >= LocCount) { SendClientMessage(playerid, C_ERR, "Gecersiz mekan no."); return 1; }
+        new Float:px, Float:py, Float:pz, Float:pa, q2[260], nm[32];
+        GetPlayerPos(playerid, px, py, pz);
+        GetPlayerFacingAngle(playerid, pa);
+        format(nm, sizeof nm, "%s", LocName[lc]);
+        Esc(nm);
+        format(q2, sizeof q2, "INSERT OR REPLACE INTO konumlar (isim,x,y,z,a) VALUES ('%s',%d,%d,%d,%d)", nm, floatround(px * 1000.0), floatround(py * 1000.0), floatround((pz - 0.6) * 1000.0), floatround(pa * 1000.0));
+        DbExec(q2);
+        SendClientMessage(playerid, C_OK, "Konum kaydedildi. RCON konsoluna  reloadfs departman  yaz.");
         return 1;
     }
 
