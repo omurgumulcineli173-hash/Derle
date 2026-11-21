@@ -893,18 +893,19 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if(!strcmp(cmdtext, "/yardim", true) || !strcmp(cmdtext, "/komutlar", true))
     {
-        ShowPlayerDialog(playerid, D_NONE, DIALOG_STYLE_MSGBOX, "Yardim - Komutlar",
-            "{FFFFFF}/departman  {AAAAAA}- Departman menusunu acar (herkes)\n"
-            "{FFFFFF}/yardim  {AAAAAA}- Bu menuyu acar\n"
-            "{FFFFFF}/tablet  {AAAAAA}- Yetkili oldugun departmanin tabletini acar\n"
-            "{FFFFFF}/gorev  {AAAAAA}- Gorev durumunu degistirir\n"
-            "{FFFFFF}/d [mesaj]  {AAAAAA}- Departman telsizi\n"
-            "{FFFFFF}/mekanlar  {AAAAAA}- Departman mekanlari, haritada isaretler\n"
-            "{FFFFFF}/haberler  {AAAAAA}- Medya haber akisi\n"
-            "{FFFFFF}/ihbar [mesaj]  {AAAAAA}- Polise ihbar\n"
-            "{FFFFFF}/acil [mesaj]  {AAAAAA}- Hastaneye acil cagri\n"
-            "{FFFFFF}/sikayet [mesaj]  {AAAAAA}- Belediyeye sikayet",
-            "Kapat", "");
+        new h[900];
+        h[0] = 0;
+        strcat(h, "{FFFFFF}/departman  {AAAAAA}- Departman menusunu acar (herkes)\n", sizeof h);
+        strcat(h, "{FFFFFF}/yardim  {AAAAAA}- Bu menuyu acar\n", sizeof h);
+        strcat(h, "{FFFFFF}/tablet  {AAAAAA}- Yetkili oldugun departmanin tabletini acar\n", sizeof h);
+        strcat(h, "{FFFFFF}/gorev  {AAAAAA}- Gorev durumunu degistirir\n", sizeof h);
+        strcat(h, "{FFFFFF}/d [mesaj]  {AAAAAA}- Departman telsizi\n", sizeof h);
+        strcat(h, "{FFFFFF}/mekanlar  {AAAAAA}- Departman mekanlari, haritada isaretler\n", sizeof h);
+        strcat(h, "{FFFFFF}/haberler  {AAAAAA}- Medya haber akisi\n", sizeof h);
+        strcat(h, "{FFFFFF}/ihbar [mesaj]  {AAAAAA}- Polise ihbar\n", sizeof h);
+        strcat(h, "{FFFFFF}/acil [mesaj]  {AAAAAA}- Hastaneye acil cagri\n", sizeof h);
+        strcat(h, "{FFFFFF}/sikayet [mesaj]  {AAAAAA}- Belediyeye sikayet", sizeof h);
+        ShowPlayerDialog(playerid, D_NONE, DIALOG_STYLE_MSGBOX, "Yardim - Komutlar", h, "Kapat", "");
         return 1;
     }
 
