@@ -13,7 +13,8 @@
     KOMUTLAR:
       /departman  /tablet  /gorev  /d  /haberler  /mekanlar  /yardim
       /ihbar  /acil  /sikayet
-      /departmanver [id] [dep 0-4] [rutbe 1-5]   (sadece RCON admin)
+      /departmanver [id] [dep 0-4] [rutbe 1-5]   (sadece admin)
+      ADMIN: /tablet [0-4] (her departmanda tam yetki)  /mekangit [0-4]  /mekanyer [0-4]
     ====================================================================
 */
 
@@ -32,6 +33,9 @@
 #define MAAS_SURE_DK     60
 #define BASLANGIC_BUTCE  100000
 #define DB_DOSYA         "departman.db"
+
+// Ana sistemden admin seviyesi okunamazsa bu oyuncu adi admin sayilir
+#define YEDEK_ADMIN      "Lebron_B"
 
 #define C_ERR 0xFF6B6BFF
 #define C_OK  0x6BFF8BFF
@@ -63,7 +67,7 @@ enum
     D_YONET, D_YONETID, D_YONETRANK, D_YONETMAAS,
     D_RECSUB, D_RECHEDEF, D_RECMETIN,
     D_SORGUK, D_SORGUP, D_RUHSAT,
-    D_HBASLIK, D_HMETIN, D_HTUR, D_HONAY, D_HONAYACT, D_HGECMIS, D_HGECACT, D_HEDIT
+    D_HBASLIK, D_HMETIN, D_HTUR, D_HONAY, D_HONAYACT, D_HGECMIS, D_HGECACT, D_HEDIT, D_ADMDEP
 }
 
 // ------------------------------------------------------------------
@@ -110,6 +114,7 @@ new LocName[MAX_LOC][32];
 new Float:LocOut[MAX_LOC][4];
 new Float:LocIn[MAX_LOC][4];
 new LocPickO[MAX_LOC], LocPickI[MAX_LOC];
+new Text3D:LocLblO[MAX_LOC];
 
 // ------------------------------------------------------------------
 //  OYUNCU VERILERI
@@ -117,6 +122,7 @@ new LocPickO[MAX_LOC], LocPickI[MAX_LOC];
 new DB:gDB;
 new PDep[MAX_PLAYERS], PRank[MAX_PLAYERS], PMaas[MAX_PLAYERS];
 new bool:PDuty[MAX_PLAYERS];
+new bool:PAdm[MAX_PLAYERS];   // admin gecici tam yetki modu (DB'ye yazilmaz)
 new PAct[MAX_PLAYERS], PTarget[MAX_PLAYERS], PTmp[MAX_PLAYERS];
 new PTmpStr[MAX_PLAYERS][128], PTmpStr2[MAX_PLAYERS][128];
 new PTab[MAX_PLAYERS][MAX_TABITEM];
@@ -130,6 +136,16 @@ forward PanelYenile();
 // ==================================================================
 //  YARDIMCI FONKSIYONLAR
 // ==================================================================
+stock IsAdm(playerid)
+{
+    if(IsPlayerAdmin(playerid)) return 1;
+    if(CallRemoteFunction("RP_GetAdminLevel", "i", playerid) >= 1) return 1;
+    new nm[MAX_PLAYER_NAME];
+    GetPlayerName(playerid, nm, sizeof nm);
+    if(!strcmp(nm, YEDEK_ADMIN, true)) return 1;
+    return 0;
+}
+
 stock DbExec(q[])
 {
     new DBResult:r = db_query(gDB, q);
@@ -306,6 +322,7 @@ stock DBInit()
     DbExec("CREATE TABLE IF NOT EXISTS gecmis (id INTEGER PRIMARY KEY AUTOINCREMENT, dep INTEGER, isim TEXT, olay TEXT, tarih TEXT)");
     DbExec("CREATE TABLE IF NOT EXISTS butce (dep INTEGER PRIMARY KEY, miktar INTEGER)");
     DbExec("CREATE TABLE IF NOT EXISTS haberler (id INTEGER PRIMARY KEY AUTOINCREMENT, baslik TEXT, metin TEXT, yazar TEXT, durum INTEGER, herkes INTEGER, tur INTEGER, tarih TEXT)");
+    DbExec("CREATE TABLE IF NOT EXISTS mekanyer (dep INTEGER PRIMARY KEY, x REAL, y REAL, z REAL, a REAL)");
     DbExec("CREATE TABLE IF NOT EXISTS araclar (plaka TEXT PRIMARY KEY, sahip TEXT, model TEXT, tarih TEXT)");
     new q[100];
     for(new d = 0; d < MAX_DEP; d++)
@@ -333,7 +350,7 @@ stock AddLoc(dep, name[], pub, Float:ox, Float:oy, Float:oz, Float:oa, Float:ix,
     LocPickI[i] = CreatePickup(1318, 1, ix, iy, iz, i + 1);
     new lbl[80];
     format(lbl, sizeof lbl, "%s\n%s", name, pub ? "Herkese Acik" : "Sadece Personel");
-    Create3DTextLabel(lbl, DepColor[dep], ox, oy, oz + 0.8, 20.0, 0, 0);
+    LocLblO[i] = Create3DTextLabel(lbl, DepColor[dep], ox, oy, oz + 0.8, 20.0, 0, 0);
     Create3DTextLabel("CIKIS", 0xFFFFFFFF, ix, iy, iz + 0.8, 10.0, i + 1, 0);
     return i;
 }
@@ -343,7 +360,7 @@ stock DoTeleport(playerid, loc, bool:giris)
     new Float:x, Float:y, Float:z, Float:a;
     if(giris)
     {
-        if(!LocPub[loc] && PDep[playerid] != LocDep[loc])
+        if(!LocPub[loc] && PDep[playerid] != LocDep[loc] && !IsAdm(playerid))
         {
             new s[96];
             format(s, sizeof s, "Bu mekana sadece %s personeli girebilir.", DepName[LocDep[loc]]);
@@ -377,6 +394,48 @@ stock SetMapIcons(playerid)
 {
     for(new i = 0; i < LocCount; i++)
         SetPlayerMapIcon(playerid, i, LocOut[i][0], LocOut[i][1], LocOut[i][2], DepIcon[LocDep[i]], 0, MAPICON_GLOBAL);
+}
+
+// Mekan giris noktasini tasi (pickup + yazi + harita ikonu yenilenir)
+stock MoveLocOut(i, Float:x, Float:y, Float:z, Float:ang)
+{
+    DestroyPickup(LocPickO[i]);
+    Delete3DTextLabel(LocLblO[i]);
+    LocOut[i][0] = x; LocOut[i][1] = y; LocOut[i][2] = z; LocOut[i][3] = ang;
+    LocPickO[i] = CreatePickup(1318, 1, x, y, z, 0);
+    new lbl[80];
+    format(lbl, sizeof lbl, "%s\n%s", LocName[i], LocPub[i] ? "Herkese Acik" : "Sadece Personel");
+    LocLblO[i] = Create3DTextLabel(lbl, DepColor[LocDep[i]], x, y, z + 0.8, 20.0, 0, 0);
+    for(new p = 0; p < MAX_PLAYERS; p++) if(IsPlayerConnected(p)) SetMapIcons(p);
+}
+
+stock FindLocByDep(dep)
+{
+    for(new i = 0; i < LocCount; i++) if(LocDep[i] == dep) return i;
+    return -1;
+}
+
+// /mekanyer ile kaydedilmis giris noktalarini yukle
+stock LoadLocOverrides()
+{
+    new DBResult:r = db_query(gDB, "SELECT dep,x,y,z,a FROM mekanyer");
+    if(!r) return;
+    if(db_num_rows(r))
+    {
+        do
+        {
+            new f[32], dep, Float:x, Float:y, Float:z, Float:ang;
+            db_get_field(r, 0, f, sizeof f); dep = strval(f);
+            db_get_field(r, 1, f, sizeof f); x = floatstr(f);
+            db_get_field(r, 2, f, sizeof f); y = floatstr(f);
+            db_get_field(r, 3, f, sizeof f); z = floatstr(f);
+            db_get_field(r, 4, f, sizeof f); ang = floatstr(f);
+            new li = FindLocByDep(dep);
+            if(li >= 0) MoveLocOut(li, x, y, z, ang);
+        }
+        while(db_next_row(r));
+    }
+    db_free_result(r);
 }
 
 // ==================================================================
@@ -438,11 +497,39 @@ public PanelYenile()
     for(new i = 0; i < MAX_PLAYERS; i++) if(IsPlayerConnected(i) && PDep[i] >= 0) ShowPanel(i);
 }
 
+// Admin: istedigi departmanda gecici Mudur yetkisiyle calisir (DB'ye yazilmaz, maas almaz)
+stock AdminAsDep(playerid, dep)
+{
+    PDep[playerid] = dep;
+    PRank[playerid] = MAX_RANK;
+    PMaas[playerid] = 0;
+    PDuty[playerid] = true;
+    PAdm[playerid] = true;
+    ShowPanel(playerid);
+    new s[100];
+    format(s, sizeof s, "[ADMIN] %s icin tam yetki (Mudur) modundasin.", DepName[dep]);
+    SendClientMessage(playerid, DepColor[dep], s);
+}
+
+stock ShowAdmDepList(playerid)
+{
+    new s[300];
+    s[0] = 0;
+    for(new d = 0; d < MAX_DEP; d++)
+    {
+        strcat(s, DepEmbed[d], sizeof s);
+        strcat(s, DepName[d], sizeof s);
+        strcat(s, "\n", sizeof s);
+    }
+    ShowPlayerDialog(playerid, D_ADMDEP, DIALOG_STYLE_LIST, "Admin - Hangi tableti acmak istiyorsun?", s, "Ac", "Kapat");
+}
+
 // ==================================================================
 //  UYELIK
 // ==================================================================
 stock UpdateMember(playerid)
 {
+    if(PAdm[playerid]) return;
     new q[200], n[MAX_PLAYER_NAME];
     GetPlayerName(playerid, n, sizeof n);
     Esc(n);
@@ -456,6 +543,7 @@ stock SetMember(playerid, dep, rank)
     GetPlayerName(playerid, n, sizeof n);
     Esc(n);
     if(old >= 0 && old != dep) AddHistory(old, n, "Baska departmana gecti");
+    PAdm[playerid] = false;
     PDep[playerid] = dep;
     PRank[playerid] = rank;
     PMaas[playerid] = rank * RANK_MAAS;
@@ -474,6 +562,14 @@ stock LeaveDept(playerid)
 {
     new n[MAX_PLAYER_NAME], q[160], d = PDep[playerid];
     if(d < 0) return 0;
+    if(PAdm[playerid])
+    {
+        PAdm[playerid] = false;
+        PDep[playerid] = -1; PRank[playerid] = 0; PMaas[playerid] = 0; PDuty[playerid] = false;
+        HidePanel(playerid);
+        SendClientMessage(playerid, C_INF, "Admin yetki modundan cikildi.");
+        return 1;
+    }
     GetPlayerName(playerid, n, sizeof n);
     Esc(n);
     AddHistory(d, n, "Departmandan ayrildi/cikarildi");
@@ -780,10 +876,12 @@ public OnFilterScriptInit()
     // AddLoc(dep, "isim", herkese_acik, giris_x,y,z,aci, ic_x,y,z,aci, interior_id)
     // NOT: Asagidakiler ORNEK koordinatlardir. Kendi mekanlarini buraya ekle/degistir.
     AddLoc(0, "Belediye Binasi", 1, 1481.0, -1768.3, 18.8, 0.0, 389.8, 173.8, 1008.4, 90.0, 3);
-    AddLoc(1, "FBI Merkezi", 0, 1464.1, -1010.2, 26.8, 180.0, 246.4, 110.8, 1003.2, 0.0, 10);
+    AddLoc(1, "FBI Merkezi", 0, 1476.0, -1696.0, 14.0, 180.0, 246.4, 110.8, 1003.2, 0.0, 10);
     AddLoc(2, "LSPD Merkezi", 1, 1554.7, -1675.6, 16.2, 90.0, 246.7, 63.9, 1003.6, 0.0, 6);
     AddLoc(3, "All Saints Hastanesi", 1, 1177.9, -1323.9, 14.0, 270.0, 288.7, 169.3, 1007.2, 0.0, 3);
-    AddLoc(4, "Medya Merkezi (NEWS)", 1, 1031.0, -1133.0, 23.9, 0.0, 288.7, 169.3, 1007.2, 0.0, 3);
+    AddLoc(4, "Medya Merkezi (NEWS)", 1, 1486.0, -1696.0, 14.0, 180.0, 288.7, 169.3, 1007.2, 0.0, 3);
+
+    LoadLocOverrides();
 
     SetTimer("MaasVer", MAAS_SURE_DK * 60 * 1000, true);
     SetTimer("PanelYenile", 30000, true);
@@ -805,7 +903,7 @@ public OnFilterScriptExit()
 
 public OnPlayerConnect(playerid)
 {
-    PDep[playerid] = -1; PRank[playerid] = 0; PMaas[playerid] = 0; PDuty[playerid] = false;
+    PDep[playerid] = -1; PRank[playerid] = 0; PMaas[playerid] = 0; PDuty[playerid] = false; PAdm[playerid] = false;
     PTeleTick[playerid] = 0;
     CreatePanel(playerid);
     new q[160], n[MAX_PLAYER_NAME], f[16], DBResult:r;
@@ -830,7 +928,7 @@ public OnPlayerConnect(playerid)
 
 public OnPlayerDisconnect(playerid, reason)
 {
-    PDep[playerid] = -1;
+    PDep[playerid] = -1; PAdm[playerid] = false;
     return 1;
 }
 
@@ -889,11 +987,66 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if(!strcmp(cmdtext, "/departman", true)) { ShowDepList(playerid); return 1; }
 
-    if(!strcmp(cmdtext, "/tablet", true)) { OpenTablet(playerid); return 1; }
+    if(!strcmp(cmdtext, "/tablet", true, 7) && (cmdtext[7] == 0 || cmdtext[7] == ' '))
+    {
+        if(IsAdm(playerid))
+        {
+            if(cmdtext[7] == ' ' && cmdtext[8] >= '0' && cmdtext[8] < '0' + MAX_DEP)
+            {
+                AdminAsDep(playerid, cmdtext[8] - '0');
+                OpenTablet(playerid);
+                return 1;
+            }
+            if(PDep[playerid] < 0) { ShowAdmDepList(playerid); return 1; }
+        }
+        OpenTablet(playerid);
+        return 1;
+    }
+
+    if(!strcmp(cmdtext, "/mekanyer", true, 9))
+    {
+        if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
+        if(cmdtext[9] != ' ' || cmdtext[10] < '0' || cmdtext[10] >= '0' + MAX_DEP)
+        {
+            SendClientMessage(playerid, C_INF, "Kullanim: /mekanyer [dep 0-4]  (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya)");
+            SendClientMessage(playerid, C_INF, "Binanin kapisinin onunde, binadan uzaga (sokaga) bakarak dur ve yaz. Giris noktasi bulundugun yer olur.");
+            return 1;
+        }
+        new li = FindLocByDep(cmdtext[10] - '0');
+        if(li < 0) { SendClientMessage(playerid, C_ERR, "Bu departmanin mekani yok."); return 1; }
+        if(GetPlayerInterior(playerid) != 0) { SendClientMessage(playerid, C_ERR, "Dis mekanda (interior 0) olmalisin."); return 1; }
+        new Float:px, Float:py, Float:pz, Float:pa, q2[160];
+        GetPlayerPos(playerid, px, py, pz);
+        GetPlayerFacingAngle(playerid, pa);
+        pz -= 0.5;
+        MoveLocOut(li, px, py, pz, pa);
+        format(q2, sizeof q2, "INSERT OR REPLACE INTO mekanyer (dep,x,y,z,a) VALUES (%d,%.4f,%.4f,%.4f,%.2f)", cmdtext[10] - '0', px, py, pz, pa);
+        DbExec(q2);
+        format(s, sizeof s, "%s giris noktasi buraya tasindi ve kaydedildi.", LocName[li]);
+        SendClientMessage(playerid, C_OK, s);
+        return 1;
+    }
+
+    if(!strcmp(cmdtext, "/mekangit", true, 9))
+    {
+        if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
+        if(cmdtext[9] != ' ' || cmdtext[10] < '0' || cmdtext[10] >= '0' + MAX_DEP)
+        {
+            SendClientMessage(playerid, C_INF, "Kullanim: /mekangit [dep 0-4]  (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya)");
+            return 1;
+        }
+        new li = FindLocByDep(cmdtext[10] - '0');
+        if(li < 0) { SendClientMessage(playerid, C_ERR, "Bu departmanin mekani yok."); return 1; }
+        SetPlayerInterior(playerid, 0);
+        SetPlayerVirtualWorld(playerid, 0);
+        SetPlayerPos(playerid, LocOut[li][0], LocOut[li][1], LocOut[li][2] + 1.0);
+        SendClientMessage(playerid, C_OK, "Mekan girisine isinlandin.");
+        return 1;
+    }
 
     if(!strcmp(cmdtext, "/yardim", true) || !strcmp(cmdtext, "/komutlar", true))
     {
-        new h[900];
+        new h[1500];
         h[0] = 0;
         strcat(h, "{FFFFFF}/departman  {AAAAAA}- Departman menusunu acar (herkes)\n", sizeof h);
         strcat(h, "{FFFFFF}/yardim  {AAAAAA}- Bu menuyu acar\n", sizeof h);
@@ -905,6 +1058,14 @@ public OnPlayerCommandText(playerid, cmdtext[])
         strcat(h, "{FFFFFF}/ihbar [mesaj]  {AAAAAA}- Polise ihbar\n", sizeof h);
         strcat(h, "{FFFFFF}/acil [mesaj]  {AAAAAA}- Hastaneye acil cagri\n", sizeof h);
         strcat(h, "{FFFFFF}/sikayet [mesaj]  {AAAAAA}- Belediyeye sikayet", sizeof h);
+        if(IsAdm(playerid))
+        {
+            strcat(h, "\n\n{FF8800}ADMIN:\n", sizeof h);
+            strcat(h, "{FFFFFF}/tablet [0-4]  {AAAAAA}- Istedigin departmanin tabletini tam yetkiyle acar\n", sizeof h);
+            strcat(h, "{FFFFFF}/mekangit [0-4]  {AAAAAA}- Departman mekanina isinlanir\n", sizeof h);
+            strcat(h, "{FFFFFF}/mekanyer [0-4]  {AAAAAA}- Mekan girisini bulundugun yere tasir\n", sizeof h);
+            strcat(h, "{FFFFFF}/departmanver [id] [dep] [rutbe]  {AAAAAA}- Oyuncuyu departmana alir", sizeof h);
+        }
         ShowPlayerDialog(playerid, D_NONE, DIALOG_STYLE_MSGBOX, "Yardim - Komutlar", h, "Kapat", "");
         return 1;
     }
@@ -973,7 +1134,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if(!strcmp(cmdtext, "/departmanver", true, 13))
     {
-        if(!IsPlayerAdmin(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece RCON admin icindir."); return 1; }
+        if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
         new idx = 13, a[16], b[16], c[16];
         Token(cmdtext, idx, a); Token(cmdtext, idx, b); Token(cmdtext, idx, c);
         if(!a[0] || !b[0] || !c[0]) { SendClientMessage(playerid, C_INF, "Kullanim: /departmanver [id] [dep 0-4] [rutbe 1-5]  (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya)"); return 1; }
@@ -992,7 +1153,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 // ==================================================================
 public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 {
-    if(dialogid < D_NONE || dialogid > D_HEDIT) return 0;
+    if(dialogid < D_NONE || dialogid > D_ADMDEP) return 0;
 
     new d = PDep[playerid], n[MAX_PLAYER_NAME], s[600], q[400], buf[130];
     GetPlayerName(playerid, n, sizeof n);
@@ -1030,6 +1191,14 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         SetPlayerCheckpoint(playerid, LocOut[listitem][0], LocOut[listitem][1], LocOut[listitem][2], 4.0);
         format(s, sizeof s, "%s haritada isaretlendi.", LocName[listitem]);
         SendClientMessage(playerid, C_INF, s);
+        return 1;
+    }
+
+    if(dialogid == D_ADMDEP)
+    {
+        if(!response || !IsAdm(playerid) || listitem < 0 || listitem >= MAX_DEP) return 1;
+        AdminAsDep(playerid, listitem);
+        OpenTablet(playerid);
         return 1;
     }
 
