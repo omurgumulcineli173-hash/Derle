@@ -11,7 +11,7 @@
 */
 
 #include <a_samp>
-#include <sampvoice>
+#include "sampvoice.inc"
 
 #define SES_MESAFE      40.0
 #define SES_TUSU        0x42        // B tusu
