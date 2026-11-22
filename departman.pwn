@@ -17,7 +17,7 @@
       PERSONEL: /personel /rutbeler /duyurular /duyuru /dmesaj /butce /butceyatir /butcecek /kayit /kayitekle
               /sorgu /plaka /ruhsat /gecmis /iseal /cikar /rutbever /terfi /dusur /maasayarla /alim /alimseviye
       MEDYA : /haberyaz /yayingecmisi /haberbekleyen /haberbak /haberonay /haberred /haberkaldir /haberbaslik
-      ADMIN : /admindep [0-8] /rutbeisim /rutbeyetki /rutbeekle /rutbesil /mekangit /mekanyer /kiyafetyer
+      ADMIN : /admindep [0-9] /rutbeisim /rutbeyetki /rutbeekle /rutbesil /mekangit /mekanyer /kiyafetyer
               /seviyever /departmanver
     ====================================================================
 */
@@ -27,8 +27,9 @@
 #pragma dynamic 16384
 #pragma tabsize 0
 
-#define MAX_DEP          9
+#define MAX_DEP          10
 #define GANG_BASLA       5      // 5,6,7,8 = cete (maas yok)
+#define GANG_SON         9      // 9 = ORDU (maasli kurum)
 #define MAX_RANK         10     // bir kurumda en fazla rutbe
 #define DEF_RANKS        5      // varsayilan rutbe sayisi
 #define MAX_LOC          16
@@ -62,14 +63,14 @@
 // ------------------------------------------------------------------
 //  DEPARTMAN VERILERI
 // ------------------------------------------------------------------
-new DepName[MAX_DEP][24] = {"Belediye", "FBI", "Polis (LSPD)", "Hastane (EMS)", "Medya (NEWS)", "Los Namados", "Liberty", "Inferno", "Vipers"};
-new DepTablet[MAX_DEP][24] = {"Belediye Tableti", "FBI MDT", "Polis MDT", "EMS Tableti", "Haber Tableti", "Los Namados Paneli", "Liberty Paneli", "Inferno Paneli", "Vipers Paneli"};
-new DepColor[MAX_DEP] = {0xF1C40FFF, 0x95A5A6FF, 0x3498DBFF, 0xE74C3CFF, 0x9B59B6FF, 0xFFFF00FF, 0x1E40FFFF, 0xFF0000FF, 0x00C800FF};
-new DepEmbed[MAX_DEP][10] = {"{F1C40F}", "{95A5A6}", "{3498DB}", "{E74C3C}", "{9B59B6}", "{FFFF00}", "{1E40FF}", "{FF0000}", "{00C800}"};
-new DepRadio[MAX_DEP][24] = {"Belediye Telsizi", "FBI Telsizi", "LSPD Telsizi", "EMS Telsizi", "NEWS Telsizi", "Los Namados Telsizi", "Liberty Telsizi", "Inferno Telsizi", "Vipers Telsizi"};
-new DepFrek[MAX_DEP][12] = {"100.1", "101.5", "911.0", "112.0", "103.7", "666.1", "666.2", "666.3", "666.4"};
-new DepSkin[MAX_DEP] = {147, 286, 280, 274, 59, 108, 114, 121, 105};
-new DepIcon[MAX_DEP] = {36, 30, 30, 22, 55, 0, 0, 0, 0};
+new DepName[MAX_DEP][24] = {"Belediye", "FBI", "Polis (LSPD)", "Hastane (EMS)", "Medya (NEWS)", "Los Namados", "Liberty", "Inferno", "Vipers", "Ordu"};
+new DepTablet[MAX_DEP][24] = {"Belediye Tableti", "FBI MDT", "Polis MDT", "EMS Tableti", "Haber Tableti", "Los Namados Paneli", "Liberty Paneli", "Inferno Paneli", "Vipers Paneli", "Ordu Paneli"};
+new DepColor[MAX_DEP] = {0xF1C40FFF, 0x95A5A6FF, 0x3498DBFF, 0xE74C3CFF, 0x9B59B6FF, 0xFFFF00FF, 0x1E40FFFF, 0xFF0000FF, 0x00C800FF, 0x6B8E23FF};
+new DepEmbed[MAX_DEP][10] = {"{F1C40F}", "{95A5A6}", "{3498DB}", "{E74C3C}", "{9B59B6}", "{FFFF00}", "{1E40FF}", "{FF0000}", "{00C800}", "{6B8E23}"};
+new DepRadio[MAX_DEP][24] = {"Belediye Telsizi", "FBI Telsizi", "LSPD Telsizi", "EMS Telsizi", "NEWS Telsizi", "Los Namados Telsizi", "Liberty Telsizi", "Inferno Telsizi", "Vipers Telsizi", "Ordu Telsizi"};
+new DepFrek[MAX_DEP][12] = {"100.1", "101.5", "911.0", "112.0", "103.7", "666.1", "666.2", "666.3", "666.4", "105.5"};
+new DepSkin[MAX_DEP] = {147, 286, 280, 274, 59, 108, 114, 121, 105, 287};
+new DepIcon[MAX_DEP] = {36, 30, 30, 22, 55, 0, 0, 0, 0, 30};
 new DepDesc[MAX_DEP][200] =
 {
     "Sehrin yonetimi, ruhsat, vergi ve vatandas islemlerinden sorumludur.",
@@ -80,7 +81,8 @@ new DepDesc[MAX_DEP][200] =
     "Los Namados cetesi. Sokaklarin sarilar sahibidir.",
     "Liberty cetesi. Mavi renkleriyle bolgesini korur.",
     "Inferno cetesi. Kirmizilar ates gibi yayilir.",
-    "Vipers cetesi. Yesil yilanlar sessiz ve olumcul."
+    "Vipers cetesi. Yesil yilanlar sessiz ve olumcul.",
+    "Ordu. Sinirlari korur, askeri tesisleri ve guvenligi saglar, emir komuta zinciriyle calisir."
 };
 new DefRank[MAX_DEP][DEF_RANKS][24] =
 {
@@ -92,9 +94,10 @@ new DefRank[MAX_DEP][DEF_RANKS][24] =
     {"Acemi", "Uye", "Usta", "Sag Kol", "Lider"},
     {"Acemi", "Uye", "Usta", "Sag Kol", "Lider"},
     {"Acemi", "Uye", "Usta", "Sag Kol", "Lider"},
-    {"Acemi", "Uye", "Usta", "Sag Kol", "Lider"}
+    {"Acemi", "Uye", "Usta", "Sag Kol", "Lider"},
+    {"Er", "Cavus", "Tegmen", "Albay", "General"}
 };
-new RecCount[MAX_DEP] = {5, 6, 5, 5, 1, 2, 2, 2, 2};
+new RecCount[MAX_DEP] = {5, 6, 5, 5, 1, 2, 2, 2, 2, 5};
 new RecType[MAX_DEP][6][28] =
 {
     {"Is Yeri Ruhsati", "Vergi Kaydi", "Vatandas Sikayeti", "Basvuru", "Toplanti Kaydi", ""},
@@ -105,7 +108,8 @@ new RecType[MAX_DEP][6][28] =
     {"Uye Kaydi", "Operasyon Notu", "", "", "", ""},
     {"Uye Kaydi", "Operasyon Notu", "", "", "", ""},
     {"Uye Kaydi", "Operasyon Notu", "", "", "", ""},
-    {"Uye Kaydi", "Operasyon Notu", "", "", "", ""}
+    {"Uye Kaydi", "Operasyon Notu", "", "", "", ""},
+    {"Gorev Raporu", "Personel Kaydi", "Nobet Kaydi", "Disiplin Kaydi", "Gorev Atamasi", ""}
 };
 
 // ------------------------------------------------------------------
@@ -135,6 +139,7 @@ new PAct[MAX_PLAYERS], PTarget[MAX_PLAYERS], PTmp[MAX_PLAYERS];
 new PTmpStr[MAX_PLAYERS][128], PTmpStr2[MAX_PLAYERS][128];
 new PList[MAX_PLAYERS][MAX_LISTITEM];
 new PTeleTick[MAX_PLAYERS];
+new PCloTick[MAX_PLAYERS];
 new PSkinOld[MAX_PLAYERS];
 new PLevel[MAX_PLAYERS], PXP[MAX_PLAYERS];
 
@@ -477,7 +482,7 @@ stock MakeCloSpot(i)
     if(LocCloP[i]) DestroyPickup(LocCloP[i]);
     if(LocCloL[i] != Text3D:0) Delete3DTextLabel(LocCloL[i]);
     new lbl[80];
-    format(lbl, sizeof lbl, "KIYAFET\n%s", DepName[LocDep[i]]);
+    format(lbl, sizeof lbl, "KIYAFET - Giymek icin uzerine bas\n%s", DepName[LocDep[i]]);
     LocCloP[i] = CreatePickup(1275, 1, LocClo[i][0], LocClo[i][1], LocClo[i][2], i + 1);
     LocCloL[i] = Create3DTextLabel(lbl, DepColor[LocDep[i]], LocClo[i][0], LocClo[i][1], LocClo[i][2] + 0.8, 12.0, i + 1, 0);
 }
@@ -547,7 +552,7 @@ stock SetMapIcons(playerid)
 {
     for(new i = 0; i < LocCount; i++)
     {
-        if(LocDep[i] >= GANG_BASLA) continue;   // cete mekanlari haritada gorunmez
+        if(LocDep[i] >= GANG_BASLA && LocDep[i] < GANG_SON) continue;   // cete mekanlari haritada gorunmez
         SetPlayerMapIcon(playerid, i, LocOut[i][0], LocOut[i][1], LocOut[i][2], DepIcon[LocDep[i]], 0, MAPICON_GLOBAL);
     }
 }
@@ -713,7 +718,7 @@ stock SetMember(playerid, dep, rank)
     PAdm[playerid] = false;
     PDep[playerid] = dep;
     PRank[playerid] = rank;
-    PMaas[playerid] = (dep >= GANG_BASLA) ? 0 : rank * RANK_MAAS;
+    PMaas[playerid] = (dep >= GANG_BASLA && dep < GANG_SON) ? 0 : rank * RANK_MAAS;
     PDuty[playerid] = false;
     TimeStr(t);
     format(q, sizeof q, "INSERT OR REPLACE INTO uyeler (isim,dep,rutbe,maas,katilma) VALUES ('%s',%d,%d,%d,'%s')", n, dep, rank, PMaas[playerid], t);
@@ -759,7 +764,7 @@ stock SetRank(t, nr)
     new n[MAX_PLAYER_NAME], ev[100], d = PDep[t];
     GetPlayerName(t, n, sizeof n);
     PRank[t] = nr;
-    PMaas[t] = (d >= GANG_BASLA) ? 0 : nr * RANK_MAAS;
+    PMaas[t] = (d >= GANG_BASLA && d < GANG_SON) ? 0 : nr * RANK_MAAS;
     UpdateMember(t);
     format(ev, sizeof ev, "Rutbe: %s", RankName[d][nr - 1]);
     AddHistory(d, n, ev);
@@ -979,7 +984,7 @@ stock SetRankByName(name[], dep, nr)
     }
     format(nm, sizeof nm, "%s", name);
     Esc(nm);
-    format(q, sizeof q, "UPDATE uyeler SET rutbe=%d, maas=%d WHERE isim='%s' AND dep=%d", nr, (dep >= GANG_BASLA) ? 0 : nr * RANK_MAAS, nm, dep);
+    format(q, sizeof q, "UPDATE uyeler SET rutbe=%d, maas=%d WHERE isim='%s' AND dep=%d", nr, (dep >= GANG_BASLA && dep < GANG_SON) ? 0 : nr * RANK_MAAS, nm, dep);
     DbExec(q);
     format(ev, sizeof ev, "Rutbe: %s", RankName[dep][nr - 1]);
     AddHistory(dep, nm, ev);
@@ -1198,17 +1203,33 @@ stock OpenJoin(playerid, li)
     return 1;
 }
 
-// Ic mekandaki KIYAFET noktasi
+// Ic mekandaki KIYAFET noktasi: ustune basinca kiyafet otomatik giyilir, tekrar basinca eski kiyafet geri gelir
 stock OpenCloset(playerid, li)
 {
     new d = LocDep[li], s[120];
+    if(GetTickCount() - PCloTick[playerid] < 5000) return 1;   // uzerinde dururken tekrar tekrar degistirme
+    PCloTick[playerid] = GetTickCount();
     if(PDep[playerid] != d && !IsAdm(playerid))
     {
         format(s, sizeof s, "Bu kiyafet yeri sadece %s uyeleri icindir.", DepName[d]);
         SendClientMessage(playerid, C_ERR, s);
         return 1;
     }
-    SendClientMessage(playerid, DepColor[d], "Kiyafet dolabi: /kiyafet giy   veya   /kiyafet eski");
+    if(GetPlayerSkin(playerid) == DepSkin[d])
+    {
+        if(PSkinOld[playerid] >= 0) SetPlayerSkin(playerid, PSkinOld[playerid]);
+        GameTextForPlayer(playerid, "~w~Kiyafet ~r~cikarildi", 2500, 3);
+        SendClientMessage(playerid, C_INF, "Eski kiyafetine dondun.");
+    }
+    else
+    {
+        PSkinOld[playerid] = GetPlayerSkin(playerid);
+        SetPlayerSkin(playerid, DepSkin[d]);
+        format(s, sizeof s, "~w~%s kiyafeti ~g~giyildi", DepName[d]);
+        GameTextForPlayer(playerid, s, 2500, 3);
+        format(s, sizeof s, "%s kiyafetini giydin. Cikarmak icin tekrar ayni noktaya bas.", DepName[d]);
+        SendClientMessage(playerid, DepColor[d], s);
+    }
     return 1;
 }
 
@@ -1233,6 +1254,9 @@ public OnFilterScriptInit()
     AddLoc(6, "Liberty Evi", 0, 2371.0, -1945.0, 13.5, 90.0, 2496.0, -1692.1, 1014.7, 180.0, 3);
     AddLoc(7, "Inferno Evi", 0, 1892.0, -1682.0, 13.5, 270.0, 2365.1, -1135.6, 1050.9, 0.0, 8);
     AddLoc(8, "Vipers Evi", 0, 2523.5, -1679.3, 15.5, 270.0, 2467.0, -1698.0, 1013.5, 90.0, 2);
+
+    // ORDU (sadece personel). Koordinatlar ORNEKTIR: /mekanyer 9 ile gercek yere tasi, /kiyafetyer 9 ile kiyafet yerini ayarla.
+    AddLoc(9, "Ordu Karargahi", 0, 2745.0, -2453.0, 13.6, 90.0, 285.8, -40.0, 1001.5, 0.0, 1);
 
     LoadLocOverrides();
     LoadCloOverrides();
@@ -1428,7 +1452,7 @@ stock CmdDepInfo(playerid, d)
     new s[300], l[100], mud[32], rl[300], ml[300];
     if(d < 0 || d >= MAX_DEP)
     {
-        SendClientMessage(playerid, C_ERR, "Gecersiz no. 0-8 arasi gir. Liste icin /departman");
+        SendClientMessage(playerid, C_ERR, "Gecersiz no. 0-9 arasi gir. Liste icin /departman");
         return 1;
     }
     GetMudur(d, mud, sizeof mud);
@@ -1773,7 +1797,7 @@ stock DYardim(playerid)
     if(IsAdm(playerid))
     {
         SendClientMessage(playerid, 0xFF8800FF, "--- ADMIN ---");
-        SendClientMessage(playerid, 0xFFFFFFFF, "/admindep [0-8]  /mekangit [0-8]  /mekanyer [0-8]  /kiyafetyer [0-8]  /seviyever [id] [seviye]  /departmanver [id] [dep] [rutbe]");
+        SendClientMessage(playerid, 0xFFFFFFFF, "/admindep [0-9]  /mekangit [0-9]  /mekanyer [0-9]  /kiyafetyer [0-9]  /seviyever [id] [seviye]  /departmanver [id] [dep] [rutbe]");
         SendClientMessage(playerid, 0xFFFFFFFF, "/rutbeler  /rutbeisim [no] [isim]  /rutbeyetki [no] [yetki no]  /rutbeekle [isim]  /rutbesil [no]   (once /admindep ile kurum sec)");
     }
     return 1;
@@ -2268,7 +2292,7 @@ stock DK_Admin(playerid, cmd[], a1[], a2[], r0[], r1[], r2[])
         if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
         if(!a1[0] || a1[0] < '0' || a1[0] >= '0' + MAX_DEP)
         {
-            SendClientMessage(playerid, C_INF, "Kullanim: /admindep [0-8]   (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya,5 Los Namados,6 Liberty,7 Inferno,8 Vipers)");
+            SendClientMessage(playerid, C_INF, "Kullanim: /admindep [0-9]   (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya,5 Los Namados,6 Liberty,7 Inferno,8 Vipers,9 Ordu)");
             SendClientMessage(playerid, C_INF, "Secilen kurumda tam yetkiyle calisirsin. Cikmak icin: /ayril onay");
             return 1;
         }
@@ -2278,7 +2302,7 @@ stock DK_Admin(playerid, cmd[], a1[], a2[], r0[], r1[], r2[])
     if(!strcmp(cmd, "/rutbeisim", true) || !strcmp(cmd, "/rutbeyetki", true) || !strcmp(cmd, "/rutbeekle", true) || !strcmp(cmd, "/rutbesil", true))
     {
         if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
-        if(d < 0) { SendClientMessage(playerid, C_ERR, "Once /admindep [0-8] ile bir kurum sec."); return 1; }
+        if(d < 0) { SendClientMessage(playerid, C_ERR, "Once /admindep [0-9] ile bir kurum sec."); return 1; }
         new ri = strval(a1) - 1;
         if(!strcmp(cmd, "/rutbeekle", true))
         {
@@ -2381,7 +2405,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
         if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
         if(cmdtext[9] != ' ' || cmdtext[10] < '0' || cmdtext[10] >= '0' + MAX_DEP)
         {
-            SendClientMessage(playerid, C_INF, "Kullanim: /mekanyer [dep 0-8]  (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya,5 Los Namados,6 Liberty,7 Inferno,8 Vipers)");
+            SendClientMessage(playerid, C_INF, "Kullanim: /mekanyer [dep 0-9]  (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya,5 Los Namados,6 Liberty,7 Inferno,8 Vipers,9 Ordu)");
             SendClientMessage(playerid, C_INF, "Binanin kapisinin onunde, binadan uzaga (sokaga) bakarak dur ve yaz. Giris noktasi bulundugun yer olur.");
             return 1;
         }
@@ -2405,7 +2429,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
         if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
         if(cmdtext[11] != ' ' || cmdtext[12] < '0' || cmdtext[12] >= '0' + MAX_DEP)
         {
-            SendClientMessage(playerid, C_INF, "Kullanim: /kiyafetyer [dep 0-8]  (mekanin ICINDE, kiyafet yeri olacak noktada dur)");
+            SendClientMessage(playerid, C_INF, "Kullanim: /kiyafetyer [dep 0-9]  (mekanin ICINDE, kiyafet yeri olacak noktada dur)");
             return 1;
         }
         new li = FindLocByDep(cmdtext[12] - '0');
@@ -2428,7 +2452,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
         if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
         if(cmdtext[9] != ' ' || cmdtext[10] < '0' || cmdtext[10] >= '0' + MAX_DEP)
         {
-            SendClientMessage(playerid, C_INF, "Kullanim: /mekangit [dep 0-8]  (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya,5 Los Namados,6 Liberty,7 Inferno,8 Vipers)");
+            SendClientMessage(playerid, C_INF, "Kullanim: /mekangit [dep 0-9]  (0 Belediye,1 FBI,2 Polis,3 EMS,4 Medya,5 Los Namados,6 Liberty,7 Inferno,8 Vipers,9 Ordu)");
             return 1;
         }
         new li = FindLocByDep(cmdtext[10] - '0');
@@ -2523,7 +2547,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
         if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
         new idx = 13, a[16], b[16], c[16];
         Token(cmdtext, idx, a); Token(cmdtext, idx, b); Token(cmdtext, idx, c);
-        if(!a[0] || !b[0] || !c[0]) { SendClientMessage(playerid, C_INF, "Kullanim: /departmanver [id] [dep 0-8] [rutbe 1-10]  (0-4 departman, 5 Los Namados,6 Liberty,7 Inferno,8 Vipers)"); return 1; }
+        if(!a[0] || !b[0] || !c[0]) { SendClientMessage(playerid, C_INF, "Kullanim: /departmanver [id] [dep 0-9] [rutbe 1-10]  (0-4 departman, 5 Los Namados,6 Liberty,7 Inferno,8 Vipers,9 Ordu)"); return 1; }
         new t = strval(a), d = strval(b), r = strval(c);
         if(t < 0 || t >= MAX_PLAYERS || !IsPlayerConnected(t)) { SendClientMessage(playerid, C_ERR, "Oyuncu bulunamadi."); return 1; }
         if(d < 0 || d >= MAX_DEP || r < 1 || r > RankCnt[d]) { SendClientMessage(playerid, C_ERR, "Gecersiz departman/rutbe."); return 1; }
