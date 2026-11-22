@@ -14,7 +14,8 @@
     KOMUTLAR:
       /departman  /tablet  /gorev  /d  /haberler  /mekanlar  /yardim
       /ihbar  /acil  /sikayet
-      /departmanver [id] [dep 0-8] [rutbe 1-5]   (sadece admin)
+      /departmanver [id] [dep 0-8] [rutbe 1-10]   (sadece admin)
+      /ayril  /seviye  /siralama  /telsiz  /t  /r   ADMIN: /seviyever [id] [seviye]
       ADMIN: /tablet [0-8] (her departmanda tam yetki)  /mekangit [0-8]  /mekanyer [0-8]  /kiyafetyer [0-8]
     ====================================================================
 */
@@ -26,11 +27,13 @@
 
 #define MAX_DEP          9
 #define GANG_BASLA       5      // 5,6,7,8 = cete (maas yok)
-#define MAX_RANK         5
+#define MAX_RANK         10     // bir kurumda en fazla rutbe
+#define DEF_RANKS        5      // varsayilan rutbe sayisi
 #define MAX_LOC          16
-#define MAX_TABITEM      24
+#define MAX_TABITEM      32
 #define MAX_LISTITEM     30
-#define YONETIM_RUTBE    4
+#define MIN_LEVEL_DEF    5      // alimlar icin varsayilan minimum seviye
+#define MAX_ADMIN_LEVEL  1000   // adminlerin seviyesi
 #define RANK_MAAS        600
 #define MAAS_SURE_DK     60
 #define BASLANGIC_BUTCE  100000
@@ -43,7 +46,17 @@
 #define C_OK  0x6BFF8BFF
 #define C_INF 0x6BC8FFFF
 
-#define IsYonetici(%1) (PDep[%1] >= 0 && PRank[%1] >= YONETIM_RUTBE)
+// Yetkiler (Discord rolleri gibi). Admin tabletten her rutbe icin acilip kapatilir.
+#define PERM_COUNT   9
+#define P_ALIM       1      // alimlari ac/kapat
+#define P_ISEAL      2      // personel ise al
+#define P_CIKAR      4      // personel isten cikar
+#define P_RUTBE      8      // rutbe ver / terfi
+#define P_MAAS       16     // maas belirle
+#define P_DUYURU     32     // duyuru paylas
+#define P_BUTCE      64     // butce yonetimi
+#define P_MEDYA      128    // haber onay / yonetim (medya)
+#define P_YONETICI   256    // YONETICI: tum yetkiler
 
 // Tablet islem kodlari
 #define ACT_PERS     1
@@ -59,6 +72,12 @@
 #define ACT_HONAY    11
 #define ACT_HGEC     12
 #define ACT_DUTY     13
+#define ACT_ALIM     14
+#define ACT_AYRIL    15
+#define ACT_SIRALAMA 16
+#define ACT_ROLLER   17
+#define ACT_TELSIZ   18
+#define ACT_PROFIL   19
 #define ACT_REC      100
 
 enum
@@ -69,7 +88,8 @@ enum
     D_YONET, D_YONETID, D_YONETRANK, D_YONETMAAS,
     D_RECSUB, D_RECHEDEF, D_RECMETIN,
     D_SORGUK, D_SORGUP, D_RUHSAT,
-    D_HBASLIK, D_HMETIN, D_HTUR, D_HONAY, D_HONAYACT, D_HGECMIS, D_HGECACT, D_HEDIT, D_ADMDEP, D_KATIL, D_KIYAFET
+    D_HBASLIK, D_HMETIN, D_HTUR, D_HONAY, D_HONAYACT, D_HGECMIS, D_HGECACT, D_HEDIT, D_ADMDEP, D_KATIL, D_KIYAFET,
+    D_AYRIL, D_PLIST, D_PACT, D_ALIM, D_ALIMLVL, D_ROLES, D_ROLEACT, D_ROLENAME, D_ROLEPERM, D_ROLENEW
 }
 
 // ------------------------------------------------------------------
@@ -95,7 +115,7 @@ new DepDesc[MAX_DEP][200] =
     "Inferno cetesi. Kirmizilar ates gibi yayilir.",
     "Vipers cetesi. Yesil yilanlar sessiz ve olumcul."
 };
-new RankName[MAX_DEP][MAX_RANK][24] =
+new DefRank[MAX_DEP][DEF_RANKS][24] =
 {
     {"Memur", "Uzman Memur", "Sef", "Baskan Yrd.", "Belediye Baskani"},
     {"Stajyer Ajan", "Ajan", "Ozel Ajan", "Mudur Yrd.", "FBI Muduru"},
@@ -150,11 +170,26 @@ new PTab[MAX_PLAYERS][MAX_TABITEM];
 new PList[MAX_PLAYERS][MAX_LISTITEM];
 new PTeleTick[MAX_PLAYERS];
 new PSkinOld[MAX_PLAYERS];
+new PLevel[MAX_PLAYERS], PXP[MAX_PLAYERS];
+
+// Rutbeler ve yetkiler (admin tabletten degistirilir, DB'de saklanir)
+new RankName[MAX_DEP][MAX_RANK][24];
+new RankPerm[MAX_DEP][MAX_RANK];
+new RankCnt[MAX_DEP];
+new PermName[PERM_COUNT][32] = {"Alim Ac / Kapat", "Personel Ise Al", "Personel Isten Cikar", "Rutbe Ver / Terfi", "Maas Belirle", "Duyuru Paylas", "Butce Yonetimi", "Haber Onay (Medya)", "YONETICI (Tum Yetkiler)"};
+
+// Alim ayarlari
+new DepAlim[MAX_DEP];
+new DepMinLvl[MAX_DEP];
+new Text:TDAlim;
+new gAlimTimer;
 new bool:PTelsiz[MAX_PLAYERS];   // telsiz modu: acikken normal yazi telsize gider
 new PlayerText:PTD[MAX_PLAYERS][4];
 
 forward MaasVer();
 forward PanelYenile();
+forward LevelTick();
+forward HideAlim();
 
 // ==================================================================
 //  YARDIMCI FONKSIYONLAR
@@ -296,33 +331,103 @@ stock CountMembers(dep)
 stock GetMudur(dep, dest[], size)
 {
     new q[100];
-    format(q, sizeof q, "SELECT isim FROM uyeler WHERE dep=%d AND rutbe=%d LIMIT 1", dep, MAX_RANK);
+    format(q, sizeof q, "SELECT isim FROM uyeler WHERE dep=%d AND rutbe=%d LIMIT 1", dep, RankCnt[dep]);
     DbGetStr(q, dest, size, "Atanmadi");
+}
+
+// SA-MP 144 karakterden uzun mesaji HIC gostermez: uzun mesaji parcalara bol
+stock SendLong(playerid, color, msg[])
+{
+    new len = strlen(msg);
+    if(len <= 140)
+    {
+        SendClientMessage(playerid, color, msg);
+        return 1;
+    }
+    new part[144], pos = 0, cut, k;
+    while(pos < len)
+    {
+        cut = 130;
+        if(len - pos <= 140) cut = len - pos;
+        else
+        {
+            k = pos + 130;
+            while(k > pos + 60 && msg[k] != ' ') k--;
+            if(msg[k] == ' ') cut = k - pos;
+        }
+        strmid(part, msg, pos, pos + cut, sizeof part);
+        SendClientMessage(playerid, color, part);
+        pos += cut;
+        while(msg[pos] == ' ') pos++;
+    }
+    return 1;
 }
 
 stock SendDep(dep, color, msg[])
 {
-    for(new i = 0; i < MAX_PLAYERS; i++) if(IsPlayerConnected(i) && PDep[i] == dep) SendClientMessage(i, color, msg);
+    for(new i = 0; i < MAX_PLAYERS; i++) if(IsPlayerConnected(i) && PDep[i] == dep) SendLong(i, color, msg);
 }
 
-// Telsiz: ayni departman/cete uyelerine gider, yakindakiler de duyar
+// Rutbe yetkisi kontrolu (admin modundaki oyuncu her yetkiye sahiptir)
+stock HasPerm(playerid, mask)
+{
+    new d = PDep[playerid];
+    if(d < 0) return 0;
+    if(PAdm[playerid]) return 1;
+    new r = PRank[playerid] - 1;
+    if(r < 0 || r >= MAX_RANK) return 0;
+    return ((RankPerm[d][r] & (mask | P_YONETICI)) != 0);
+}
+
+// ---------------- Seviye sistemi ----------------
+stock LevelNeed(lv)
+{
+    return lv * 15;     // sonraki seviye icin gereken dakika
+}
+
+stock GetLevel(playerid)
+{
+    if(IsAdm(playerid)) return MAX_ADMIN_LEVEL;
+    return PLevel[playerid];
+}
+
+stock SaveLevel(playerid)
+{
+    new n[MAX_PLAYER_NAME], q[200];
+    GetPlayerName(playerid, n, sizeof n);
+    Esc(n);
+    format(q, sizeof q, "INSERT OR REPLACE INTO seviye (isim,seviye,xp,admin) VALUES ('%s',%d,%d,%d)", n, PLevel[playerid], PXP[playerid], IsAdm(playerid) ? 1 : 0);
+    DbExec(q);
+}
+
+// Telsiz: SADECE ayni departman/cete uyelerine gider (baskasi duymaz)
 stock SendRadio(playerid, text[])
 {
     new d = PDep[playerid];
     if(d < 0) return 0;
-    new n[MAX_PLAYER_NAME], s2[200], s3[160], Float:x, Float:y, Float:z;
+    new n[MAX_PLAYER_NAME], s2[260], rk = PRank[playerid];
+    if(rk < 1) rk = 1;
+    if(rk > RankCnt[d]) rk = RankCnt[d];
     GetPlayerName(playerid, n, sizeof n);
-    format(s2, sizeof s2, "%s[%s %s] %s %s: {FFFFFF}%s", DepEmbed[d], DepRadio[d], DepFrek[d], RankName[d][PRank[playerid] - 1], n, text);
+    format(s2, sizeof s2, "%s[%s %s] %s %s: {FFFFFF}%s", DepEmbed[d], DepRadio[d], DepFrek[d], RankName[d][rk - 1], n, text);
     SendDep(d, DepColor[d], s2);
-    // yakindakiler telsiz konusmasini duyar
-    format(s3, sizeof s3, "(Telsiz) %s: %s", n, text);
-    GetPlayerPos(playerid, x, y, z);
-    for(new i = 0; i < MAX_PLAYERS; i++)
+    return 1;
+}
+
+stock ToggleTelsiz(playerid)
+{
+    new d = PDep[playerid], tm[200];
+    if(d < 0)
     {
-        if(!IsPlayerConnected(i) || i == playerid || PDep[i] == d) continue;
-        if(GetPlayerVirtualWorld(i) != GetPlayerVirtualWorld(playerid)) continue;
-        if(GetPlayerDistanceFromPoint(i, x, y, z) <= 8.0) SendClientMessage(i, 0xB0B0B0FF, s3);
+        SendClientMessage(playerid, C_ERR, "Telsizin yok. Bir departman/cete uyesi olmalisin.");
+        return 0;
     }
+    PTelsiz[playerid] = !PTelsiz[playerid];
+    if(PTelsiz[playerid])
+        format(tm, sizeof tm, "%s%s (%s) ACIK{FFFFFF}: yazdiklarin sadece %s uyelerine gider. Kapatmak icin tekrar /telsiz yaz.", DepEmbed[d], DepRadio[d], DepFrek[d], DepName[d]);
+    else
+        format(tm, sizeof tm, "%s%s KAPALI{FFFFFF}: normal sohbete donuldu.", DepEmbed[d], DepRadio[d]);
+    SendLong(playerid, PTelsiz[playerid] ? C_OK : C_INF, tm);
     return 1;
 }
 
@@ -367,12 +472,17 @@ stock DBInit()
     DbExec("CREATE TABLE IF NOT EXISTS butce (dep INTEGER PRIMARY KEY, miktar INTEGER)");
     DbExec("CREATE TABLE IF NOT EXISTS haberler (id INTEGER PRIMARY KEY AUTOINCREMENT, baslik TEXT, metin TEXT, yazar TEXT, durum INTEGER, herkes INTEGER, tur INTEGER, tarih TEXT)");
     DbExec("CREATE TABLE IF NOT EXISTS mekanyer (dep INTEGER PRIMARY KEY, x REAL, y REAL, z REAL, a REAL)");
+    DbExec("CREATE TABLE IF NOT EXISTS seviye (isim TEXT PRIMARY KEY, seviye INTEGER, xp INTEGER, admin INTEGER)");
+    DbExec("CREATE TABLE IF NOT EXISTS roller (dep INTEGER, rutbe INTEGER, isim TEXT, yetki INTEGER, PRIMARY KEY(dep,rutbe))");
+    DbExec("CREATE TABLE IF NOT EXISTS depayar (dep INTEGER PRIMARY KEY, alim INTEGER, minlvl INTEGER)");
     DbExec("CREATE TABLE IF NOT EXISTS kiyafetyer (dep INTEGER PRIMARY KEY, x REAL, y REAL, z REAL)");
     DbExec("CREATE TABLE IF NOT EXISTS araclar (plaka TEXT PRIMARY KEY, sahip TEXT, model TEXT, tarih TEXT)");
     new q[100];
     for(new d = 0; d < MAX_DEP; d++)
     {
         format(q, sizeof q, "INSERT OR IGNORE INTO butce (dep,miktar) VALUES (%d,%d)", d, BASLANGIC_BUTCE);
+        DbExec(q);
+        format(q, sizeof q, "INSERT OR IGNORE INTO depayar (dep,alim,minlvl) VALUES (%d,0,%d)", d, MIN_LEVEL_DEF);
         DbExec(q);
     }
     return 1;
@@ -549,7 +659,7 @@ stock CreatePanel(playerid)
 {
     PTD[playerid][0] = CreatePlayerTextDraw(playerid, 10.0, 150.0, "_");
     PlayerTextDrawFont(playerid, PTD[playerid][0], 1);
-    PlayerTextDrawLetterSize(playerid, PTD[playerid][0], 0.5, 11.6);
+    PlayerTextDrawLetterSize(playerid, PTD[playerid][0], 0.5, 13.0);
     PlayerTextDrawTextSize(playerid, PTD[playerid][0], 160.0, 0.0);
     PlayerTextDrawUseBox(playerid, PTD[playerid][0], 1);
     PlayerTextDrawBoxColor(playerid, PTD[playerid][0], 0x0A2A66AA);
@@ -587,8 +697,8 @@ stock ShowPanel(playerid)
     new s[320];
     format(s, sizeof s, "~b~~h~%s", DepName[d]);
     PlayerTextDrawSetString(playerid, PTD[playerid][1], s);
-    format(s, sizeof s, "~w~Rutbe: ~y~%s~n~~w~Gorev: %s~n~~w~Cevrimici: ~y~%d~n~~w~Maas: ~g~$%d~n~~n~~w~/tablet ~b~| ~w~/departman",
-        RankName[d][PRank[playerid] - 1],
+    format(s, sizeof s, "~w~Rutbe: ~y~%s~n~~w~Seviye: ~y~%d~n~~w~Gorev: %s~n~~w~Cevrimici: ~y~%d~n~~w~Maas: ~g~$%d~n~~n~~w~/tablet ~b~| ~w~/departman",
+        RankName[d][PRank[playerid] - 1], GetLevel(playerid),
         PDuty[playerid] ? "~g~Aktif" : "~r~Pasif",
         CountOnline(d), PMaas[playerid]);
     PlayerTextDrawSetString(playerid, PTD[playerid][2], s);
@@ -605,7 +715,7 @@ public PanelYenile()
 stock AdminAsDep(playerid, dep)
 {
     PDep[playerid] = dep;
-    PRank[playerid] = MAX_RANK;
+    PRank[playerid] = RankCnt[dep];
     PMaas[playerid] = 0;
     PDuty[playerid] = true;
     PAdm[playerid] = true;
@@ -679,6 +789,8 @@ stock LeaveDept(playerid)
     AddHistory(d, n, "Departmandan ayrildi/cikarildi");
     format(q, sizeof q, "DELETE FROM uyeler WHERE isim='%s'", n);
     DbExec(q);
+    // personel kiyafetini giyiyorsa eski kiyafetine don
+    if(PSkinOld[playerid] >= 0 && GetPlayerSkin(playerid) == DepSkin[d]) SetPlayerSkin(playerid, PSkinOld[playerid]);
     PDep[playerid] = -1;
     PRank[playerid] = 0;
     PMaas[playerid] = 0;
@@ -704,16 +816,376 @@ stock SetRank(t, nr)
 }
 
 // ==================================================================
+//  RUTBE / YETKI SISTEMI
+// ==================================================================
+stock DefaultPerm(rank, cnt)
+{
+    if(rank >= cnt) return P_YONETICI;
+    if(rank == cnt - 1) return (P_ALIM | P_ISEAL | P_CIKAR | P_RUTBE | P_MAAS | P_DUYURU | P_BUTCE | P_MEDYA);
+    return 0;
+}
+
+stock SetupRanks()
+{
+    for(new d = 0; d < MAX_DEP; d++)
+    {
+        RankCnt[d] = DEF_RANKS;
+        for(new r = 0; r < MAX_RANK; r++)
+        {
+            RankName[d][r][0] = 0;
+            RankPerm[d][r] = 0;
+        }
+        for(new r = 0; r < DEF_RANKS; r++)
+        {
+            format(RankName[d][r], 24, "%s", DefRank[d][r]);
+            RankPerm[d][r] = DefaultPerm(r + 1, DEF_RANKS);
+        }
+    }
+}
+
+stock SaveRoles(dep)
+{
+    new q[200], nm[24];
+    format(q, sizeof q, "DELETE FROM roller WHERE dep=%d", dep);
+    DbExec(q);
+    for(new r = 0; r < RankCnt[dep]; r++)
+    {
+        format(nm, sizeof nm, "%s", RankName[dep][r]);
+        Esc(nm);
+        format(q, sizeof q, "INSERT INTO roller (dep,rutbe,isim,yetki) VALUES (%d,%d,'%s',%d)", dep, r + 1, nm, RankPerm[dep][r]);
+        DbExec(q);
+    }
+}
+
+stock LoadRoles()
+{
+    new q[140];
+    for(new d = 0; d < MAX_DEP; d++)
+    {
+        format(q, sizeof q, "SELECT COUNT(*) FROM roller WHERE dep=%d", d);
+        new cnt = DbGetInt(q);
+        if(cnt < 2 || cnt > MAX_RANK) continue;
+        format(q, sizeof q, "SELECT rutbe,isim,yetki FROM roller WHERE dep=%d ORDER BY rutbe ASC", d);
+        new DBResult:r = db_query(gDB, q);
+        if(!r) continue;
+        new f[32], idx = 0;
+        if(db_num_rows(r))
+        {
+            do
+            {
+                if(idx >= MAX_RANK) break;
+                db_get_field(r, 1, f, sizeof f);
+                format(RankName[d][idx], 24, "%s", f);
+                db_get_field(r, 2, f, sizeof f);
+                RankPerm[d][idx] = strval(f);
+                idx++;
+            }
+            while(db_next_row(r));
+        }
+        db_free_result(r);
+        if(idx >= 2)
+        {
+            RankCnt[d] = idx;
+            for(new k = idx; k < MAX_RANK; k++)
+            {
+                RankName[d][k][0] = 0;
+                RankPerm[d][k] = 0;
+            }
+        }
+    }
+}
+
+stock LoadDepAyar()
+{
+    new q[100];
+    for(new d = 0; d < MAX_DEP; d++)
+    {
+        format(q, sizeof q, "SELECT alim FROM depayar WHERE dep=%d", d);
+        DepAlim[d] = DbGetInt(q, 0);
+        format(q, sizeof q, "SELECT minlvl FROM depayar WHERE dep=%d", d);
+        DepMinLvl[d] = DbGetInt(q, MIN_LEVEL_DEF);
+    }
+}
+
+// En alta (rutbe 1'in altina) yeni rutbe ekler, mevcut uyeler ayni rutbede kalir
+stock RankAddBottom(dep, name[])
+{
+    if(RankCnt[dep] >= MAX_RANK) return 0;
+    for(new r = RankCnt[dep]; r > 0; r--)
+    {
+        format(RankName[dep][r], 24, "%s", RankName[dep][r - 1]);
+        RankPerm[dep][r] = RankPerm[dep][r - 1];
+    }
+    format(RankName[dep][0], 24, "%s", name);
+    RankPerm[dep][0] = 0;
+    RankCnt[dep]++;
+    new q[100];
+    format(q, sizeof q, "UPDATE uyeler SET rutbe=rutbe+1 WHERE dep=%d", dep);
+    DbExec(q);
+    for(new i = 0; i < MAX_PLAYERS; i++)
+    {
+        if(!IsPlayerConnected(i) || PDep[i] != dep) continue;
+        if(PAdm[i]) PRank[i] = RankCnt[dep];
+        else PRank[i]++;
+        ShowPanel(i);
+    }
+    SaveRoles(dep);
+    return 1;
+}
+
+// Lider rutbesi silinemez. Silinen rutbenin uyeleri bir alt rutbeye gecer.
+stock RankDelete(dep, idx)
+{
+    new cnt = RankCnt[dep], rk = idx + 1, q[120];
+    if(cnt <= 2 || idx < 0 || idx >= cnt - 1) return 0;
+    if(rk > 1)
+    {
+        format(q, sizeof q, "UPDATE uyeler SET rutbe=%d WHERE dep=%d AND rutbe=%d", rk - 1, dep, rk);
+        DbExec(q);
+    }
+    format(q, sizeof q, "UPDATE uyeler SET rutbe=rutbe-1 WHERE dep=%d AND rutbe>%d", dep, rk);
+    DbExec(q);
+    for(new r = idx; r < cnt - 1; r++)
+    {
+        format(RankName[dep][r], 24, "%s", RankName[dep][r + 1]);
+        RankPerm[dep][r] = RankPerm[dep][r + 1];
+    }
+    RankName[dep][cnt - 1][0] = 0;
+    RankPerm[dep][cnt - 1] = 0;
+    RankCnt[dep] = cnt - 1;
+    for(new i = 0; i < MAX_PLAYERS; i++)
+    {
+        if(!IsPlayerConnected(i) || PDep[i] != dep) continue;
+        if(PAdm[i]) PRank[i] = RankCnt[dep];
+        else if(PRank[i] == rk) { if(rk > 1) PRank[i] = rk - 1; }
+        else if(PRank[i] > rk) PRank[i]--;
+        if(PRank[i] > RankCnt[dep]) PRank[i] = RankCnt[dep];
+        ShowPanel(i);
+    }
+    SaveRoles(dep);
+    return 1;
+}
+
+// ==================================================================
+//  ISIM TABANLI PERSONEL ISLEMLERI (cevrimdisi personel icin de calisir)
+// ==================================================================
+stock FindOnlineByName(name[])
+{
+    new n[MAX_PLAYER_NAME];
+    for(new i = 0; i < MAX_PLAYERS; i++)
+    {
+        if(!IsPlayerConnected(i)) continue;
+        GetPlayerName(i, n, sizeof n);
+        if(!strcmp(n, name, true)) return i;
+    }
+    return INVALID_PLAYER_ID;
+}
+
+stock GetMemberRank(name[], dep)
+{
+    new q[160], nm[32];
+    format(nm, sizeof nm, "%s", name);
+    Esc(nm);
+    format(q, sizeof q, "SELECT rutbe FROM uyeler WHERE isim='%s' AND dep=%d", nm, dep);
+    return DbGetInt(q, 0);
+}
+
+stock GetMemberByIndex(dep, idx, dest[], size)
+{
+    new q[200];
+    dest[0] = 0;
+    format(q, sizeof q, "SELECT isim FROM uyeler WHERE dep=%d ORDER BY rutbe DESC, isim ASC LIMIT 1 OFFSET %d", dep, idx);
+    DbGetStr(q, dest, size, "");
+    return (dest[0] != 0);
+}
+
+stock CanManage(playerid, tr, name[])
+{
+    new me[MAX_PLAYER_NAME];
+    if(PAdm[playerid]) return 1;
+    GetPlayerName(playerid, me, sizeof me);
+    if(!strcmp(me, name, true)) return 0;
+    return (tr < PRank[playerid]);
+}
+
+stock MaxAssignable(playerid)
+{
+    if(PAdm[playerid]) return RankCnt[PDep[playerid]];
+    return PRank[playerid] - 1;
+}
+
+stock SetRankByName(name[], dep, nr)
+{
+    new nm[32], q[220], ev[100], t = FindOnlineByName(name);
+    if(nr < 1) nr = 1;
+    if(nr > RankCnt[dep]) nr = RankCnt[dep];
+    if(t != INVALID_PLAYER_ID && PDep[t] == dep && !PAdm[t])
+    {
+        SetRank(t, nr);
+        return 1;
+    }
+    format(nm, sizeof nm, "%s", name);
+    Esc(nm);
+    format(q, sizeof q, "UPDATE uyeler SET rutbe=%d, maas=%d WHERE isim='%s' AND dep=%d", nr, (dep >= GANG_BASLA) ? 0 : nr * RANK_MAAS, nm, dep);
+    DbExec(q);
+    format(ev, sizeof ev, "Rutbe: %s", RankName[dep][nr - 1]);
+    AddHistory(dep, nm, ev);
+    return 1;
+}
+
+stock RemoveByName(name[], dep)
+{
+    new nm[32], q[160], t = FindOnlineByName(name);
+    if(t != INVALID_PLAYER_ID && PDep[t] == dep && !PAdm[t])
+    {
+        LeaveDept(t);
+        return 1;
+    }
+    format(nm, sizeof nm, "%s", name);
+    Esc(nm);
+    AddHistory(dep, nm, "Departmandan cikarildi");
+    format(q, sizeof q, "DELETE FROM uyeler WHERE isim='%s' AND dep=%d", nm, dep);
+    DbExec(q);
+    return 1;
+}
+
+stock SetMaasByName(name[], dep, m)
+{
+    new nm[32], q[160], ev[60], t = FindOnlineByName(name);
+    format(nm, sizeof nm, "%s", name);
+    Esc(nm);
+    format(ev, sizeof ev, "Maas belirlendi: $%d", m);
+    if(t != INVALID_PLAYER_ID && PDep[t] == dep && !PAdm[t])
+    {
+        PMaas[t] = m;
+        UpdateMember(t);
+        ShowPanel(t);
+        SendClientMessage(t, C_INF, "Maasin guncellendi.");
+    }
+    else
+    {
+        format(q, sizeof q, "UPDATE uyeler SET maas=%d WHERE isim='%s' AND dep=%d", m, nm, dep);
+        DbExec(q);
+    }
+    AddHistory(dep, nm, ev);
+    return 1;
+}
+
+// ==================================================================
+//  KATILMA (1 kisi = en fazla 1 departman/cete), ALIM, SEVIYE
+// ==================================================================
+// doit = false: sadece kontrol eder (mesaj verir), true: katilir
+stock TryJoin(playerid, dep, bool:doit)
+{
+    new s[180];
+    if(dep < 0 || dep >= MAX_DEP) return 0;
+    if(PDep[playerid] == dep)
+    {
+        format(s, sizeof s, "Zaten %s uyesisin.", DepName[dep]);
+        SendClientMessage(playerid, C_INF, s);
+        return 0;
+    }
+    if(PDep[playerid] >= 0)
+    {
+        format(s, sizeof s, "Zaten %s icindesin. Ayni anda en fazla 1 departman/cetede olabilirsin, once /ayril yaz.", DepName[PDep[playerid]]);
+        SendLong(playerid, C_ERR, s);
+        return 0;
+    }
+    if(!IsAdm(playerid))
+    {
+        if(!DepAlim[dep])
+        {
+            format(s, sizeof s, "%s alimlari su an KAPALI.", DepName[dep]);
+            SendClientMessage(playerid, C_ERR, s);
+            return 0;
+        }
+        if(GetLevel(playerid) < DepMinLvl[dep])
+        {
+            format(s, sizeof s, "%s icin en az %d. seviye gerekli. (Senin seviyen: %d)", DepName[dep], DepMinLvl[dep], GetLevel(playerid));
+            SendLong(playerid, C_ERR, s);
+            return 0;
+        }
+    }
+    if(doit) SetMember(playerid, dep, 1);
+    return 1;
+}
+
+stock MakeAlimTD()
+{
+    TDAlim = TextDrawCreate(320.0, 22.0, "_");
+    TextDrawAlignment(TDAlim, 2);
+    TextDrawFont(TDAlim, 2);
+    TextDrawLetterSize(TDAlim, 0.38, 1.6);
+    TextDrawSetOutline(TDAlim, 1);
+    TextDrawSetProportional(TDAlim, 1);
+    TextDrawColor(TDAlim, 0xFFFFFFFF);
+}
+
+public HideAlim()
+{
+    TextDrawHideForAll(TDAlim);
+    gAlimTimer = 0;
+}
+
+stock SetAlim(dep, acik)
+{
+    new q[100], s[180];
+    DepAlim[dep] = acik ? 1 : 0;
+    format(q, sizeof q, "UPDATE depayar SET alim=%d WHERE dep=%d", DepAlim[dep], dep);
+    DbExec(q);
+    if(acik)
+    {
+        format(s, sizeof s, "%s ALIMLARI ACILDI~n~Seviye %d ve uzeri katilabilir", DepName[dep], DepMinLvl[dep]);
+        TextDrawSetString(TDAlim, s);
+        TextDrawColor(TDAlim, DepColor[dep]);
+        TextDrawShowForAll(TDAlim);
+        if(gAlimTimer) KillTimer(gAlimTimer);
+        gAlimTimer = SetTimer("HideAlim", 10000, false);
+        format(s, sizeof s, "[ALIM] %s alimlari ACILDI! Seviye %d ve uzeri katilabilir. Giristeki KATIL noktasina git.", DepName[dep], DepMinLvl[dep]);
+        SendClientMessageToAll(DepColor[dep], s);
+    }
+    else
+    {
+        format(s, sizeof s, "[ALIM] %s alimlari KAPANDI.", DepName[dep]);
+        SendClientMessageToAll(DepColor[dep], s);
+    }
+}
+
+public LevelTick()
+{
+    new s[100], st;
+    for(new i = 0; i < MAX_PLAYERS; i++)
+    {
+        if(!IsPlayerConnected(i)) continue;
+        st = GetPlayerState(i);
+        if(st == PLAYER_STATE_NONE || st == PLAYER_STATE_SPECTATING) continue;
+        if(!IsAdm(i))
+        {
+            PXP[i]++;
+            if(PXP[i] >= LevelNeed(PLevel[i]) && PLevel[i] < 999)
+            {
+                PXP[i] -= LevelNeed(PLevel[i]);
+                PLevel[i]++;
+                format(s, sizeof s, "SEVIYE ATLADIN! Yeni seviyen: %d", PLevel[i]);
+                SendClientMessage(i, C_OK, s);
+                ShowPanel(i);
+            }
+        }
+        SaveLevel(i);
+    }
+}
+
+// ==================================================================
 //  DIALOG GOSTERIMLERI
 // ==================================================================
 stock ShowDepList(playerid)
 {
-    new s[1100], l[140], mud[32];
-    format(s, sizeof s, "Departman\tPersonel\tYonetici\n");
+    new s[1400], l[160], mud[32];
+    format(s, sizeof s, "Departman\tPersonel\tYonetici\tAlim\n");
     for(new d = 0; d < MAX_DEP; d++)
     {
         GetMudur(d, mud, sizeof mud);
-        format(l, sizeof l, "%s%s\t%d\t%s\n", DepEmbed[d], DepName[d], CountMembers(d), mud);
+        format(l, sizeof l, "%s%s\t%d\t%s\t%s\n", DepEmbed[d], DepName[d], CountMembers(d), mud, DepAlim[d] ? "{44FF44}Acik" : "{FF4444}Kapali");
         strcat(s, l, sizeof s);
     }
     ShowPlayerDialog(playerid, D_DEPLIST, DIALOG_STYLE_TABLIST_HEADERS, "Departmanlar", s, "Sec", "Kapat");
@@ -721,11 +1193,11 @@ stock ShowDepList(playerid)
 
 stock ShowDepInfo(playerid, d)
 {
-    new s[1200], l[160], mud[32];
+    new s[1700], l[160], mud[32];
     GetMudur(d, mud, sizeof mud);
-    format(s, sizeof s, "%s%s\n{FFFFFF}%s\n\n{AAAAAA}Yonetici: {FFFFFF}%s\n{AAAAAA}Personel: {FFFFFF}%d  (Cevrimici: %d)\n\n{AAAAAA}Rutbeler:\n{FFFFFF}",
-        DepEmbed[d], DepName[d], DepDesc[d], mud, CountMembers(d), CountOnline(d));
-    for(new r = 0; r < MAX_RANK; r++)
+    format(s, sizeof s, "%s%s\n{FFFFFF}%s\n\n{AAAAAA}Yonetici: {FFFFFF}%s\n{AAAAAA}Personel: {FFFFFF}%d  (Cevrimici: %d)\n{AAAAAA}Alimlar: %s  {AAAAAA}Min. seviye: {FFFF00}%d\n\n{AAAAAA}Rutbeler:\n{FFFFFF}",
+        DepEmbed[d], DepName[d], DepDesc[d], mud, CountMembers(d), CountOnline(d), DepAlim[d] ? "{44FF44}ACIK" : "{FF4444}KAPALI", DepMinLvl[d]);
+    for(new r = 0; r < RankCnt[d]; r++)
     {
         format(l, sizeof l, "%d) %s\n", r + 1, RankName[d][r]);
         strcat(s, l, sizeof s);
@@ -763,7 +1235,11 @@ stock ActAllowed(playerid, act)
     if(d < 0) return 0;
     switch(act)
     {
-        case ACT_DUYNEW, ACT_YONET, ACT_HONAY: return IsYonetici(playerid);
+        case ACT_DUYNEW: return HasPerm(playerid, P_DUYURU);
+        case ACT_YONET: return HasPerm(playerid, P_ISEAL | P_CIKAR | P_RUTBE | P_MAAS);
+        case ACT_HONAY: return HasPerm(playerid, P_MEDYA);
+        case ACT_ALIM: return HasPerm(playerid, P_ALIM);
+        case ACT_ROLLER: return IsAdm(playerid);
         case ACT_SORGUK: return (d <= 3);
         case ACT_SORGUP: return (d == 1 || d == 2);
         case ACT_RUHSAT: return (d == 0);
@@ -776,14 +1252,17 @@ stock OpenTablet(playerid)
 {
     new d = PDep[playerid];
     if(d < 0) return SendClientMessage(playerid, C_ERR, "Departman personeli degilsin. /departman ile bir departmana katil.");
-    new list[1024], n = 0, cap[64], l[48];
+    new list[1500], n = 0, cap[64], l[48];
     list[0] = 0;
     for(new i = 0; i < MAX_TABITEM; i++) PTab[playerid][i] = 0;
+    AddTab(playerid, n, ACT_PROFIL, "Profilim / Yetkilerim", list, sizeof list);
     AddTab(playerid, n, ACT_PERS, "Personel Listesi", list, sizeof list);
     AddTab(playerid, n, ACT_DUY, "Departman Duyurulari", list, sizeof list);
     AddTab(playerid, n, ACT_MSG, "Departman Mesaji Gonder", list, sizeof list);
+    AddTab(playerid, n, ACT_TELSIZ, "Telsizi Ac / Kapat", list, sizeof list);
     AddTab(playerid, n, ACT_BUTCE, "Departman Butcesi", list, sizeof list);
     AddTab(playerid, n, ACT_DUTY, "Gorev Durumu Degistir", list, sizeof list);
+    AddTab(playerid, n, ACT_SIRALAMA, "Seviye Siralamasi", list, sizeof list);
     if(ActAllowed(playerid, ACT_SORGUK)) AddTab(playerid, n, ACT_SORGUK, "Vatandas Sorgula", list, sizeof list);
     if(ActAllowed(playerid, ACT_SORGUP)) AddTab(playerid, n, ACT_SORGUP, "Plaka / Arac Sorgula", list, sizeof list);
     if(ActAllowed(playerid, ACT_RUHSAT)) AddTab(playerid, n, ACT_RUHSAT, "Arac Ruhsati Ver", list, sizeof list);
@@ -796,7 +1275,10 @@ stock OpenTablet(playerid)
         AddTab(playerid, n, ACT_REC + t, l, list, sizeof list);
     }
     if(ActAllowed(playerid, ACT_DUYNEW)) AddTab(playerid, n, ACT_DUYNEW, "Duyuru Paylas", list, sizeof list);
+    if(ActAllowed(playerid, ACT_ALIM)) AddTab(playerid, n, ACT_ALIM, "Alim Yonetimi (Ac / Kapat)", list, sizeof list);
     if(ActAllowed(playerid, ACT_YONET)) AddTab(playerid, n, ACT_YONET, "Yonetim Paneli", list, sizeof list);
+    if(ActAllowed(playerid, ACT_ROLLER)) AddTab(playerid, n, ACT_ROLLER, "Rutbe & Yetki Ayarlari (Admin)", list, sizeof list);
+    AddTab(playerid, n, ACT_AYRIL, "Departmandan / Cetedan Ayril", list, sizeof list);
     format(cap, sizeof cap, "%s%s", DepEmbed[d], DepTablet[d]);
     ShowPlayerDialog(playerid, D_TAB, DIALOG_STYLE_LIST, cap, list, "Sec", "Kapat");
     return 1;
@@ -819,7 +1301,7 @@ stock ShowPersonel(playerid)
                 db_get_field(r, 2, c, sizeof c);
                 new rk = strval(b);
                 if(rk < 1) rk = 1;
-                if(rk > MAX_RANK) rk = MAX_RANK;
+                if(rk > RankCnt[d]) rk = RankCnt[d];
                 format(l, sizeof l, "%s\t%s\t%s\n", a, RankName[d][rk - 1], IsNameOnline(a) ? "{44FF44}Cevrimici" : "{AAAAAA}Cevrimdisi");
                 strcat(s, l, sizeof s);
             }
@@ -932,7 +1414,7 @@ stock SaveHaber(playerid)
     format(mt, sizeof mt, "%s", PTmpStr2[playerid]);
     Esc(bs); Esc(mt);
     TimeStr(t);
-    durum = (PRank[playerid] >= YONETIM_RUTBE) ? 1 : 0;
+    durum = HasPerm(playerid, P_MEDYA) ? 1 : 0;
     herkes = (tur == 1) ? 0 : 1;
     format(q, sizeof q, "INSERT INTO haberler (baslik,metin,yazar,durum,herkes,tur,tarih) VALUES ('%s','%s','%s',%d,%d,%d,'%s')", bs, mt, n, durum, herkes, tur, t);
     DbExec(q);
@@ -970,23 +1452,243 @@ stock ShowHaberFeed(playerid)
     ShowPlayerDialog(playerid, D_NONE, DIALOG_STYLE_MSGBOX, "Haber Akisi (NEWS)", s, "Kapat", "");
 }
 
+stock ShowHistory(playerid, name[])
+{
+    new d = PDep[playerid], nm[32], DBResult:r, a[100], b[24], list[2000], l[160], q[200], cap[64];
+    format(nm, sizeof nm, "%s", name);
+    Esc(nm);
+    list[0] = 0;
+    format(q, sizeof q, "SELECT olay,tarih FROM gecmis WHERE dep=%d AND isim='%s' ORDER BY id DESC LIMIT 15", d, nm);
+    r = db_query(gDB, q);
+    if(r)
+    {
+        if(db_num_rows(r))
+        {
+            do
+            {
+                db_get_field(r, 0, a, sizeof a);
+                db_get_field(r, 1, b, sizeof b);
+                format(l, sizeof l, "{AAAAAA}[%s] {FFFFFF}%s\n", b, a);
+                strcat(list, l, sizeof list);
+            }
+            while(db_next_row(r));
+        }
+        db_free_result(r);
+    }
+    if(!list[0]) format(list, sizeof list, "Kayit bulunamadi.");
+    format(cap, sizeof cap, "Personel Gecmisi: %s", nm);
+    ShowBack(playerid, DIALOG_STYLE_MSGBOX, cap, list);
+}
+
+stock ShowYonet(playerid)
+{
+    new s[300], k = 0;
+    s[0] = 0;
+    for(new i = 0; i < MAX_LISTITEM; i++) PList[playerid][i] = 0;
+    if(HasPerm(playerid, P_RUTBE | P_CIKAR | P_MAAS)) { strcat(s, "Personel Listesi / Yonet\n", sizeof s); PList[playerid][k++] = 1; }
+    if(HasPerm(playerid, P_ISEAL)) { strcat(s, "Oyuncuyu Ise Al (ID / Isim)\n", sizeof s); PList[playerid][k++] = 2; }
+    strcat(s, "Personel Gecmisini Goruntule\n", sizeof s);
+    PList[playerid][k++] = 3;
+    ShowPlayerDialog(playerid, D_YONET, DIALOG_STYLE_LIST, "Yonetim Paneli", s, "Sec", "Geri");
+}
+
+stock ShowPlist(playerid)
+{
+    new d = PDep[playerid], q[200], s[2600], l[120], a[32], b[16], DBResult:r, k = 0;
+    format(s, sizeof s, "Isim\tRutbe\tDurum\n");
+    format(q, sizeof q, "SELECT isim,rutbe FROM uyeler WHERE dep=%d ORDER BY rutbe DESC, isim ASC LIMIT %d", d, MAX_LISTITEM);
+    r = db_query(gDB, q);
+    if(r)
+    {
+        if(db_num_rows(r))
+        {
+            do
+            {
+                db_get_field(r, 0, a, sizeof a);
+                db_get_field(r, 1, b, sizeof b);
+                new rk = strval(b);
+                if(rk < 1) rk = 1;
+                if(rk > RankCnt[d]) rk = RankCnt[d];
+                format(l, sizeof l, "%s\t%s\t%s\n", a, RankName[d][rk - 1], IsNameOnline(a) ? "{44FF44}Cevrimici" : "{AAAAAA}Cevrimdisi");
+                strcat(s, l, sizeof s);
+                k++;
+            }
+            while(db_next_row(r));
+        }
+        db_free_result(r);
+    }
+    if(!k)
+    {
+        ShowBack(playerid, DIALOG_STYLE_MSGBOX, "Personel Yonetimi", "Departmanda personel yok.");
+        return 0;
+    }
+    ShowPlayerDialog(playerid, D_PLIST, DIALOG_STYLE_TABLIST_HEADERS, "Personel Yonetimi (kisiyi sec)", s, "Sec", "Geri");
+    return 1;
+}
+
+stock ShowPact(playerid)
+{
+    new d = PDep[playerid], nm[32], tr, s[300], cap[64], k = 0, mg;
+    format(nm, sizeof nm, "%s", PTmpStr[playerid]);
+    tr = GetMemberRank(nm, d);
+    if(tr < 1)
+    {
+        SendClientMessage(playerid, C_ERR, "Personel bulunamadi.");
+        ShowYonet(playerid);
+        return 0;
+    }
+    if(tr > RankCnt[d]) tr = RankCnt[d];
+    mg = CanManage(playerid, tr, nm);
+    s[0] = 0;
+    for(new i = 0; i < MAX_LISTITEM; i++) PList[playerid][i] = 0;
+    if(mg && HasPerm(playerid, P_RUTBE))
+    {
+        strcat(s, "Rutbe Ver\nTerfi Ettir\nRutbe Dusur\n", sizeof s);
+        PList[playerid][k++] = 1;
+        PList[playerid][k++] = 2;
+        PList[playerid][k++] = 3;
+    }
+    if(mg && HasPerm(playerid, P_MAAS)) { strcat(s, "Maas Belirle\n", sizeof s); PList[playerid][k++] = 4; }
+    if(mg && HasPerm(playerid, P_CIKAR)) { strcat(s, "Isten Cikar\n", sizeof s); PList[playerid][k++] = 5; }
+    strcat(s, "Gecmisi Goster\n", sizeof s);
+    PList[playerid][k++] = 6;
+    if(!mg) SendClientMessage(playerid, C_INF, "Bu kisi senden ust veya esit rutbede: sadece gecmisini gorebilirsin.");
+    format(cap, sizeof cap, "%s - %s", nm, RankName[d][tr - 1]);
+    ShowPlayerDialog(playerid, D_PACT, DIALOG_STYLE_LIST, cap, s, "Sec", "Geri");
+    return 1;
+}
+
+stock ShowAlim(playerid)
+{
+    new d = PDep[playerid], s[260];
+    format(s, sizeof s, "Alimlar: %s\nMinimum seviye: {FFFF00}%d{FFFFFF} (degistirmek icin sec)",
+        DepAlim[d] ? "{44FF44}ACIK{FFFFFF} (kapatmak icin sec)" : "{FF4444}KAPALI{FFFFFF} (acmak icin sec)", DepMinLvl[d]);
+    ShowPlayerDialog(playerid, D_ALIM, DIALOG_STYLE_LIST, "Alim Yonetimi", s, "Sec", "Geri");
+}
+
+stock ShowAyril(playerid)
+{
+    new d = PDep[playerid], s[200];
+    if(d < 0) return 0;
+    format(s, sizeof s, "%s%s{FFFFFF}\n\nBu kurumdan/cetedan ayrilmak istedigine emin misin?\nRutben ve maasin silinecek.", DepEmbed[d], DepName[d]);
+    ShowPlayerDialog(playerid, D_AYRIL, DIALOG_STYLE_MSGBOX, "Ayril", s, "Ayril", "Vazgec");
+    return 1;
+}
+
+stock ShowProfil(playerid)
+{
+    new d = PDep[playerid], n[MAX_PLAYER_NAME], s[1000], l[96], rk = PRank[playerid], c = 0;
+    if(rk < 1) rk = 1;
+    if(rk > RankCnt[d]) rk = RankCnt[d];
+    GetPlayerName(playerid, n, sizeof n);
+    format(s, sizeof s, "{FFCC00}%s\n{AAAAAA}Kurum: %s%s\n{AAAAAA}Rutbe: {FFFFFF}%s  {AAAAAA}(%d/%d)\n{AAAAAA}Maas: {44FF44}$%d\n", n, DepEmbed[d], DepName[d], RankName[d][rk - 1], rk, RankCnt[d], PMaas[playerid]);
+    if(IsAdm(playerid)) format(l, sizeof l, "{AAAAAA}Seviye: {FF8800}%d (ADMIN)\n", MAX_ADMIN_LEVEL);
+    else format(l, sizeof l, "{AAAAAA}Seviye: {FFFFFF}%d  {AAAAAA}(XP: %d/%d dk)\n", PLevel[playerid], PXP[playerid], LevelNeed(PLevel[playerid]));
+    strcat(s, l, sizeof s);
+    strcat(s, "\n{AAAAAA}Yetkilerin:\n{FFFFFF}", sizeof s);
+    for(new p = 0; p < PERM_COUNT; p++)
+    {
+        if(HasPerm(playerid, (1 << p)))
+        {
+            format(l, sizeof l, "- %s\n", PermName[p]);
+            strcat(s, l, sizeof s);
+            c++;
+        }
+    }
+    if(!c) strcat(s, "- Yok\n", sizeof s);
+    ShowBack(playerid, DIALOG_STYLE_MSGBOX, "Profilim", s);
+}
+
+stock ShowSeviye(playerid)
+{
+    new s[240];
+    if(IsAdm(playerid)) format(s, sizeof s, "{FFCC00}Seviyen: {FF8800}%d (ADMIN)", MAX_ADMIN_LEVEL);
+    else format(s, sizeof s, "{FFCC00}Seviyen: {FFFFFF}%d\n{AAAAAA}XP: {FFFFFF}%d / %d dakika\n\n{AAAAAA}Her dakika oyunda kalarak XP kazanirsin.\n/siralama ile en yuksek seviyeleri gor.", PLevel[playerid], PXP[playerid], LevelNeed(PLevel[playerid]));
+    ShowPlayerDialog(playerid, D_NONE, DIALOG_STYLE_MSGBOX, "Seviye", s, "Kapat", "");
+}
+
+stock ShowSiralama(playerid, bool:back)
+{
+    new s[1800], l[140], a[32], b[12], e[12], DBResult:r, k = 0;
+    format(s, sizeof s, "#\tOyuncu\tSeviye\tKurum\n");
+    r = db_query(gDB, "SELECT s.isim, CASE WHEN s.admin=1 THEN 1000 ELSE s.seviye END AS lv, s.xp, u.dep FROM seviye s LEFT JOIN uyeler u ON u.isim=s.isim ORDER BY lv DESC, s.xp DESC LIMIT 15");
+    if(r)
+    {
+        if(db_num_rows(r))
+        {
+            do
+            {
+                db_get_field(r, 0, a, sizeof a);
+                db_get_field(r, 1, b, sizeof b);
+                db_get_field(r, 3, e, sizeof e);
+                k++;
+                new dn = -1;
+                if(e[0]) dn = strval(e);
+                format(l, sizeof l, "%d\t%s\t%s\t%s\n", k, a, b, (dn >= 0 && dn < MAX_DEP) ? DepName[dn] : "-");
+                strcat(s, l, sizeof s);
+            }
+            while(db_next_row(r));
+        }
+        db_free_result(r);
+    }
+    if(!k)
+    {
+        if(back) ShowBack(playerid, DIALOG_STYLE_MSGBOX, "Seviye Siralamasi", "Henuz kayit yok.");
+        else ShowPlayerDialog(playerid, D_NONE, DIALOG_STYLE_MSGBOX, "Seviye Siralamasi", "Henuz kayit yok.", "Kapat", "");
+        return 0;
+    }
+    if(back) ShowBack(playerid, DIALOG_STYLE_TABLIST_HEADERS, "Seviye Siralamasi (Top 15)", s);
+    else ShowPlayerDialog(playerid, D_NONE, DIALOG_STYLE_TABLIST_HEADERS, "Seviye Siralamasi (Top 15)", s, "Kapat", "");
+    return 1;
+}
+
+stock ShowRoller(playerid)
+{
+    new d = PDep[playerid], s[1300], l[140];
+    if(d < 0) return 0;
+    format(s, sizeof s, "Sira\tRutbe\tYetki\n");
+    for(new r = 0; r < RankCnt[d]; r++)
+    {
+        format(l, sizeof l, "%d%s\t%s\t%s\n", r + 1, (r == RankCnt[d] - 1) ? " (Lider)" : "", RankName[d][r],
+            (RankPerm[d][r] & P_YONETICI) ? "{FFCC00}YONETICI" : ((RankPerm[d][r] != 0) ? "{44FF44}Ozel yetkiler" : "{AAAAAA}Yok"));
+        strcat(s, l, sizeof s);
+    }
+    strcat(s, "{FFFF00}+ Yeni Rutbe Ekle\t\t\n", sizeof s);
+    ShowPlayerDialog(playerid, D_ROLES, DIALOG_STYLE_TABLIST_HEADERS, "Rutbe & Yetki Ayarlari (Admin)", s, "Sec", "Geri");
+    return 1;
+}
+
+stock ShowRoleAct(playerid)
+{
+    new d = PDep[playerid], ri = PTmp[playerid], cap[64];
+    if(d < 0 || ri < 0 || ri >= RankCnt[d]) return 0;
+    format(cap, sizeof cap, "%s%s", DepEmbed[d], RankName[d][ri]);
+    ShowPlayerDialog(playerid, D_ROLEACT, DIALOG_STYLE_LIST, cap, "Ismi Degistir\nYetkileri Duzenle\nRutbeyi Sil", "Sec", "Geri");
+    return 1;
+}
+
+stock ShowRolePerm(playerid)
+{
+    new d = PDep[playerid], ri = PTmp[playerid], s[900], l[110], cap[64];
+    if(d < 0 || ri < 0 || ri >= RankCnt[d]) return 0;
+    format(s, sizeof s, "Yetki\tDurum\n");
+    for(new p = 0; p < PERM_COUNT; p++)
+    {
+        format(l, sizeof l, "%s\t%s\n", PermName[p], (RankPerm[d][ri] & (1 << p)) ? "{44FF44}ACIK" : "{FF4444}KAPALI");
+        strcat(s, l, sizeof s);
+    }
+    format(cap, sizeof cap, "Yetkiler: %s (sec = ac/kapat)", RankName[d][ri]);
+    ShowPlayerDialog(playerid, D_ROLEPERM, DIALOG_STYLE_TABLIST_HEADERS, cap, s, "Degistir", "Geri");
+    return 1;
+}
+
 // Giristeki KATIL noktasi
 stock OpenJoin(playerid, li)
 {
     new d = LocDep[li], s[200];
     PTmp[playerid] = d;
-    if(PDep[playerid] == d)
-    {
-        format(s, sizeof s, "%sZaten %s uyesisin. Ayrilmak icin /departman yaz.", DepEmbed[d], DepName[d]);
-        SendClientMessage(playerid, C_INF, s);
-        return 1;
-    }
-    if(PDep[playerid] >= 0)
-    {
-        SendClientMessage(playerid, C_ERR, "Zaten baska bir departman/cetedesin. Once /departman ile ayril.");
-        return 1;
-    }
-    format(s, sizeof s, "%s%s{FFFFFF}\n\nBu kuruma/ceteye katilmak istiyor musun?\nRutben: %s", DepEmbed[d], DepName[d], RankName[d][0]);
+    if(!TryJoin(playerid, d, false)) return 1;
+    format(s, sizeof s, "%s%s{FFFFFF}\n\nBu kuruma/ceteye katilmak istiyor musun?\nBaslangic rutben: %s\nMinimum seviye: %d", DepEmbed[d], DepName[d], RankName[d][0], DepMinLvl[d]);
     ShowPlayerDialog(playerid, D_KATIL, DIALOG_STYLE_MSGBOX, DepName[d], s, "Katil", "Vazgec");
     return 1;
 }
@@ -1025,12 +1727,17 @@ public OnFilterScriptInit()
 
     // CETE MEKANLARI (sadece uyeler girer). Koordinatlar ORNEKTIR: /mekanyer [5-8] ile gercek yere tasi.
     AddLoc(5, "Los Namados Evi", 0, 2065.3, -1703.6, 14.1, 90.0, 2807.6, -1173.9, 1025.6, 0.0, 8);
-    AddLoc(6, "Liberty Evi", 0, 2495.3, -1689.0, 14.8, 0.0, 2496.0, -1692.1, 1014.7, 180.0, 3);
+    AddLoc(6, "Liberty Evi", 0, 2371.0, -1945.0, 13.5, 90.0, 2496.0, -1692.1, 1014.7, 180.0, 3);
     AddLoc(7, "Inferno Evi", 0, 1892.0, -1682.0, 13.5, 270.0, 2365.1, -1135.6, 1050.9, 0.0, 8);
     AddLoc(8, "Vipers Evi", 0, 2523.5, -1679.3, 15.5, 270.0, 2467.0, -1698.0, 1013.5, 90.0, 2);
 
     LoadLocOverrides();
     LoadCloOverrides();
+    SetupRanks();
+    LoadRoles();
+    LoadDepAyar();
+    MakeAlimTD();
+    SetTimer("LevelTick", 60000, true);
 
     SetTimer("MaasVer", MAAS_SURE_DK * 60 * 1000, true);
     SetTimer("PanelYenile", 30000, true);
@@ -1046,6 +1753,8 @@ public OnFilterScriptExit()
         if(!IsPlayerConnected(i)) continue;
         for(new t = 0; t < 4; t++) PlayerTextDrawDestroy(i, PTD[i][t]);
     }
+    for(new i = 0; i < MAX_PLAYERS; i++) if(IsPlayerConnected(i)) SaveLevel(i);
+    TextDrawDestroy(TDAlim);
     if(gDB) db_close(gDB);
     return 1;
 }
@@ -1054,7 +1763,8 @@ public OnPlayerConnect(playerid)
 {
     PDep[playerid] = -1; PRank[playerid] = 0; PMaas[playerid] = 0; PDuty[playerid] = false; PAdm[playerid] = false;
     PTeleTick[playerid] = 0;
-    PSkinOld[playerid] = 0;
+    PSkinOld[playerid] = -1;
+    PLevel[playerid] = 1; PXP[playerid] = 0;
     PTelsiz[playerid] = false;
     CreatePanel(playerid);
     new q[160], n[MAX_PLAYER_NAME], f[16], DBResult:r;
@@ -1071,6 +1781,20 @@ public OnPlayerConnect(playerid)
             db_get_field(r, 2, f, sizeof f); PMaas[playerid] = strval(f);
             if(PDep[playerid] < 0 || PDep[playerid] >= MAX_DEP || PRank[playerid] < 1 || PRank[playerid] > MAX_RANK)
             { PDep[playerid] = -1; PRank[playerid] = 0; }
+            if(PDep[playerid] >= 0 && PRank[playerid] > RankCnt[PDep[playerid]]) PRank[playerid] = RankCnt[PDep[playerid]];
+        }
+        db_free_result(r);
+    }
+    format(q, sizeof q, "SELECT seviye,xp FROM seviye WHERE isim='%s'", n);
+    r = db_query(gDB, q);
+    if(r)
+    {
+        if(db_num_rows(r))
+        {
+            db_get_field(r, 0, f, sizeof f); PLevel[playerid] = strval(f);
+            db_get_field(r, 1, f, sizeof f); PXP[playerid] = strval(f);
+            if(PLevel[playerid] < 1) PLevel[playerid] = 1;
+            if(PXP[playerid] < 0) PXP[playerid] = 0;
         }
         db_free_result(r);
     }
@@ -1079,6 +1803,7 @@ public OnPlayerConnect(playerid)
 
 public OnPlayerDisconnect(playerid, reason)
 {
+    SaveLevel(playerid);
     PDep[playerid] = -1; PAdm[playerid] = false; PTelsiz[playerid] = false;
     return 1;
 }
@@ -1232,7 +1957,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if(!strcmp(cmdtext, "/yardim", true) || !strcmp(cmdtext, "/komutlar", true))
     {
-        new h[1900];
+        new h[2800];
         h[0] = 0;
         strcat(h, "{FFFFFF}/departman  {AAAAAA}- Departman menusunu acar (herkes)\n", sizeof h);
         strcat(h, "{FFFFFF}/yardim  {AAAAAA}- Bu menuyu acar\n", sizeof h);
@@ -1240,6 +1965,8 @@ public OnPlayerCommandText(playerid, cmdtext[])
         strcat(h, "{FFFFFF}/gorev  {AAAAAA}- Gorev durumunu degistirir\n", sizeof h);
         strcat(h, "{FFFFFF}/d /t /r /telsiz [mesaj]  {AAAAAA}- Telsizle konus (departman/cete)\n", sizeof h);
         strcat(h, "{FFFFFF}/telsiz  {AAAAAA}- Telsiz modunu ac/kapat (acikken yazdigin telsize gider)\n", sizeof h);
+        strcat(h, "{FFFFFF}/ayril  {AAAAAA}- Departmandan/cetedan ayrilir (tabletten de olur)\n", sizeof h);
+        strcat(h, "{FFFFFF}/seviye  {AAAAAA}- Seviyeni gosterir     {FFFFFF}/siralama  {AAAAAA}- Seviye siralamasi\n", sizeof h);
         strcat(h, "{FFFFFF}/mekanlar  {AAAAAA}- Departman mekanlari, haritada isaretler\n", sizeof h);
         strcat(h, "{FFFFFF}/haberler  {AAAAAA}- Medya haber akisi\n", sizeof h);
         strcat(h, "{FFFFFF}/ihbar [mesaj]  {AAAAAA}- Polise ihbar\n", sizeof h);
@@ -1251,6 +1978,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
             strcat(h, "{FFFFFF}/tablet [0-8]  {AAAAAA}- Istedigin departmanin tabletini tam yetkiyle acar\n", sizeof h);
             strcat(h, "{FFFFFF}/mekangit [0-8]  {AAAAAA}- Departman mekanina isinlanir\n", sizeof h);
             strcat(h, "{FFFFFF}/mekanyer [0-8]  {AAAAAA}- Mekan girisini bulundugun yere tasir\n", sizeof h);
+            strcat(h, "{FFFFFF}/seviyever [id] [seviye]  {AAAAAA}- Oyuncunun seviyesini ayarlar\n", sizeof h);
             strcat(h, "{FFFFFF}/kiyafetyer [0-8]  {AAAAAA}- Ic mekandaki kiyafet yerini bulundugun yere tasir\n", sizeof h);
             strcat(h, "{FFFFFF}/departmanver [id] [dep] [rutbe]  {AAAAAA}- Oyuncuyu departmana alir", sizeof h);
         }
@@ -1269,8 +1997,8 @@ public OnPlayerCommandText(playerid, cmdtext[])
     }
 
     // ---------------- TELSIZ ----------------
-    // /d, /t, /r, /telsiz  [mesaj]  -> telsizle konus
-    // /telsiz  (mesajsiz)           -> telsiz modunu ac/kapat (acikken normal yazi telsize gider)
+    // /d, /t, /r, /telsiz  [mesaj]  -> kendi kurumunun telsizine konus (baskasi duymaz)
+    // /telsiz  (mesajsiz)           -> telsiz modunu ac/kapat (acikken yazdigin telsize gider)
     {
         new tl = 0;
         if(!strcmp(cmdtext, "/telsiz", true, 7) && (cmdtext[7] == 0 || cmdtext[7] == ' ')) tl = 7;
@@ -1282,18 +2010,38 @@ public OnPlayerCommandText(playerid, cmdtext[])
             if(PDep[playerid] < 0) { SendClientMessage(playerid, C_ERR, "Telsizin yok. Bir departman/cete uyesi olmalisin."); return 1; }
             new ti = tl;
             while(cmdtext[ti] == ' ') ti++;
-            if(!cmdtext[ti])
-            {
-                PTelsiz[playerid] = !PTelsiz[playerid];
-                new tm[144];
-                if(PTelsiz[playerid]) format(tm, sizeof tm, "%s%s (%s) ACIK: yazdiklarin artik sadece kendi telsizine gider. Kapatmak icin tekrar /telsiz yaz.", DepEmbed[PDep[playerid]], DepRadio[PDep[playerid]], DepFrek[PDep[playerid]]);
-                else format(tm, sizeof tm, "%s%s KAPALI: normal sohbete donuldu.", DepEmbed[PDep[playerid]], DepRadio[PDep[playerid]]);
-                SendClientMessage(playerid, PTelsiz[playerid] ? C_OK : C_INF, tm);
-                return 1;
-            }
+            if(!cmdtext[ti]) { ToggleTelsiz(playerid); return 1; }
             SendRadio(playerid, cmdtext[ti]);
             return 1;
         }
+    }
+
+    if(!strcmp(cmdtext, "/ayril", true))
+    {
+        if(PDep[playerid] < 0) { SendClientMessage(playerid, C_ERR, "Herhangi bir departman/cetede degilsin."); return 1; }
+        ShowAyril(playerid);
+        return 1;
+    }
+    if(!strcmp(cmdtext, "/seviye", true)) { ShowSeviye(playerid); return 1; }
+    if(!strcmp(cmdtext, "/siralama", true)) { ShowSiralama(playerid, false); return 1; }
+    if(!strcmp(cmdtext, "/seviyever", true, 10))
+    {
+        if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
+        new sidx = 10, sa[16], sb[16];
+        Token(cmdtext, sidx, sa);
+        Token(cmdtext, sidx, sb);
+        if(!sa[0] || !sb[0]) { SendClientMessage(playerid, C_INF, "Kullanim: /seviyever [id] [seviye 1-999]"); return 1; }
+        new st = strval(sa), sl = strval(sb);
+        if(st < 0 || st >= MAX_PLAYERS || !IsPlayerConnected(st)) { SendClientMessage(playerid, C_ERR, "Oyuncu bulunamadi."); return 1; }
+        if(sl < 1 || sl > 999) { SendClientMessage(playerid, C_ERR, "Seviye 1 ile 999 arasinda olmali."); return 1; }
+        PLevel[st] = sl;
+        PXP[st] = 0;
+        SaveLevel(st);
+        ShowPanel(st);
+        format(s, sizeof s, "Seviyen %d olarak ayarlandi.", sl);
+        SendClientMessage(st, C_OK, s);
+        SendClientMessage(playerid, C_OK, "Seviye ayarlandi.");
+        return 1;
     }
 
     if(!strcmp(cmdtext, "/mekanlar", true))
@@ -1344,10 +2092,10 @@ public OnPlayerCommandText(playerid, cmdtext[])
         if(!IsAdm(playerid)) { SendClientMessage(playerid, C_ERR, "Bu komut sadece adminler icindir."); return 1; }
         new idx = 13, a[16], b[16], c[16];
         Token(cmdtext, idx, a); Token(cmdtext, idx, b); Token(cmdtext, idx, c);
-        if(!a[0] || !b[0] || !c[0]) { SendClientMessage(playerid, C_INF, "Kullanim: /departmanver [id] [dep 0-8] [rutbe 1-5]  (0-4 departman, 5 Los Namados,6 Liberty,7 Inferno,8 Vipers)"); return 1; }
+        if(!a[0] || !b[0] || !c[0]) { SendClientMessage(playerid, C_INF, "Kullanim: /departmanver [id] [dep 0-8] [rutbe 1-10]  (0-4 departman, 5 Los Namados,6 Liberty,7 Inferno,8 Vipers)"); return 1; }
         new t = strval(a), d = strval(b), r = strval(c);
         if(t < 0 || t >= MAX_PLAYERS || !IsPlayerConnected(t)) { SendClientMessage(playerid, C_ERR, "Oyuncu bulunamadi."); return 1; }
-        if(d < 0 || d >= MAX_DEP || r < 1 || r > MAX_RANK) { SendClientMessage(playerid, C_ERR, "Gecersiz departman/rutbe."); return 1; }
+        if(d < 0 || d >= MAX_DEP || r < 1 || r > RankCnt[d]) { SendClientMessage(playerid, C_ERR, "Gecersiz departman/rutbe."); return 1; }
         SetMember(t, d, r);
         SendClientMessage(playerid, C_OK, "Islem tamamlandi.");
         return 1;
@@ -1360,7 +2108,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 // ==================================================================
 public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 {
-    if(dialogid < D_NONE || dialogid > D_KIYAFET) return 0;
+    if(dialogid < D_NONE || dialogid > D_ROLENEW) return 0;
 
     new d = PDep[playerid], n[MAX_PLAYER_NAME], s[600], q[400], buf[130];
     GetPlayerName(playerid, n, sizeof n);
@@ -1388,8 +2136,8 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         new dd = PTmp[playerid];
         if(!response) { ShowDepList(playerid); return 1; }
         if(dd < 0 || dd >= MAX_DEP) return 1;
-        if(PDep[playerid] == dd) LeaveDept(playerid);
-        else SetMember(playerid, dd, 1);
+        if(PDep[playerid] == dd) ShowAyril(playerid);
+        else TryJoin(playerid, dd, true);
         return 1;
     }
     if(dialogid == D_MEKANLIST)
@@ -1413,8 +2161,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     {
         new dd = PTmp[playerid];
         if(!response || dd < 0 || dd >= MAX_DEP) return 1;
-        if(PDep[playerid] >= 0) { SendClientMessage(playerid, C_ERR, "Zaten bir departman/cetedesin."); return 1; }
-        SetMember(playerid, dd, 1);
+        TryJoin(playerid, dd, true);
         return 1;
     }
 
@@ -1422,7 +2169,11 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     {
         new dd = PTmp[playerid];
         if(!response || dd < 0 || dd >= MAX_DEP) return 1;
-        if(PDep[playerid] != dd && !IsAdm(playerid)) return 1;
+        if(PDep[playerid] != dd && !IsAdm(playerid))
+        {
+            SendClientMessage(playerid, C_ERR, "Bu kiyafeti sadece personel giyebilir.");
+            return 1;
+        }
         if(listitem == 0)
         {
             if(GetPlayerSkin(playerid) != DepSkin[dd]) PSkinOld[playerid] = GetPlayerSkin(playerid);
@@ -1432,8 +2183,12 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         }
         else
         {
-            SetPlayerSkin(playerid, PSkinOld[playerid]);
-            SendClientMessage(playerid, C_INF, "Eski kiyafetine dondun.");
+            if(PSkinOld[playerid] >= 0)
+            {
+                SetPlayerSkin(playerid, PSkinOld[playerid]);
+                SendClientMessage(playerid, C_INF, "Eski kiyafetine dondun.");
+            }
+            else SendClientMessage(playerid, C_INF, "Kayitli eski kiyafetin yok.");
         }
         return 1;
     }
@@ -1475,9 +2230,9 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
             {
                 format(q, sizeof q, "SELECT miktar FROM butce WHERE dep=%d", d);
                 new b = DbGetInt(q);
-                if(IsYonetici(playerid))
+                if(HasPerm(playerid, P_BUTCE))
                 {
-                    format(s, sizeof s, "Butce Bakiyesi: $%d\nPara Yatir\nPara Cek (Sadece Mudur)", b);
+                    format(s, sizeof s, "Butce Bakiyesi: $%d\nPara Yatir\nPara Cek (Sadece Lider)", b);
                     ShowPlayerDialog(playerid, D_BUTCE, DIALOG_STYLE_LIST, "Departman Butcesi", s, "Sec", "Geri");
                 }
                 else
@@ -1486,10 +2241,17 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
                     ShowBack(playerid, DIALOG_STYLE_MSGBOX, "Departman Butcesi", s);
                 }
             }
-            case ACT_YONET:
-                ShowPlayerDialog(playerid, D_YONET, DIALOG_STYLE_LIST, "Yonetim Paneli",
-                    "Personel Ise Al\nPersonel Isten Cikar\nRutbe Ver\nTerfi Ettir\nGorevden Al (Rutbe 1)\nMaas Belirle\nPersonel Gecmisini Goruntule",
-                    "Sec", "Geri");
+            case ACT_YONET: ShowYonet(playerid);
+            case ACT_PROFIL: ShowProfil(playerid);
+            case ACT_ALIM: ShowAlim(playerid);
+            case ACT_AYRIL: ShowAyril(playerid);
+            case ACT_SIRALAMA: ShowSiralama(playerid, true);
+            case ACT_ROLLER: ShowRoller(playerid);
+            case ACT_TELSIZ:
+            {
+                ToggleTelsiz(playerid);
+                OpenTablet(playerid);
+            }
             case ACT_SORGUK: ShowPlayerDialog(playerid, D_SORGUK, DIALOG_STYLE_INPUT, "Vatandas Sorgula", "Oyuncu ID, isim veya kayitli isim yaz:", "Sorgula", "Geri");
             case ACT_SORGUP: ShowPlayerDialog(playerid, D_SORGUP, DIALOG_STYLE_INPUT, "Plaka Sorgula", "Plakayi yaz:", "Sorgula", "Geri");
             case ACT_RUHSAT: ShowPlayerDialog(playerid, D_RUHSAT, DIALOG_STYLE_INPUT, "Arac Ruhsati", "Su formatta yaz:  PLAKA, SAHIP ADI, MODEL", "Kaydet", "Geri");
@@ -1557,13 +2319,14 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     if(dialogid == D_DUYYAZ)
     {
         if(!response) { OpenTablet(playerid); return 1; }
-        if(!IsYonetici(playerid) || !buf[0]) return 1;
+        if(!HasPerm(playerid, P_DUYURU) || !buf[0]) return 1;
         new t[24];
         TimeStr(t);
         format(q, sizeof q, "INSERT INTO duyurular (dep,yazar,metin,tarih) VALUES (%d,'%s','%s','%s')", d, n, buf, t);
         DbExec(q);
         format(s, sizeof s, "[%s DUYURU] %s: %s", DepName[d], n, buf);
         SendDep(d, DepColor[d], s);
+        SendClientMessage(playerid, C_OK, "Duyuru paylasildi.");
         return 1;
     }
     if(dialogid == D_MESAJ)
@@ -1579,7 +2342,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     if(dialogid == D_BUTCE)
     {
         if(!response) { OpenTablet(playerid); return 1; }
-        if(!IsYonetici(playerid)) return 1;
+        if(!HasPerm(playerid, P_BUTCE)) return 1;
         if(listitem == 1)
         {
             PAct[playerid] = 1;
@@ -1587,7 +2350,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         }
         else if(listitem == 2)
         {
-            if(PRank[playerid] < MAX_RANK) { SendClientMessage(playerid, C_ERR, "Butceden para cekmek sadece mudur yetkisindedir."); return 1; }
+            if(!HasPerm(playerid, P_YONETICI)) { SendClientMessage(playerid, C_ERR, "Butceden para cekmek sadece lider/yonetici yetkisindedir."); return 1; }
             PAct[playerid] = 2;
             ShowPlayerDialog(playerid, D_BUTCEMIKTAR, DIALOG_STYLE_INPUT, "Para Cek", "Cekilecek miktar:", "Onayla", "Geri");
         }
@@ -1597,7 +2360,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     if(dialogid == D_BUTCEMIKTAR)
     {
         if(!response) { OpenTablet(playerid); return 1; }
-        if(!IsYonetici(playerid)) return 1;
+        if(!HasPerm(playerid, P_BUTCE)) return 1;
         new amt = strval(buf);
         if(amt <= 0 || amt > 10000000) { SendClientMessage(playerid, C_ERR, "Gecersiz miktar."); return 1; }
         if(PAct[playerid] == 1)
@@ -1611,7 +2374,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         }
         else
         {
-            if(PRank[playerid] < MAX_RANK) return 1;
+            if(!HasPerm(playerid, P_YONETICI)) return 1;
             format(q, sizeof q, "SELECT miktar FROM butce WHERE dep=%d", d);
             if(DbGetInt(q) < amt) { SendClientMessage(playerid, C_ERR, "Butcede yeterli para yok."); return 1; }
             format(q, sizeof q, "UPDATE butce SET miktar=miktar-%d WHERE dep=%d", amt, d);
@@ -1627,116 +2390,249 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     if(dialogid == D_YONET)
     {
         if(!response) { OpenTablet(playerid); return 1; }
-        if(!IsYonetici(playerid)) return 1;
-        PAct[playerid] = listitem + 1;
-        if(listitem == 6) ShowPlayerDialog(playerid, D_YONETID, DIALOG_STYLE_INPUT, "Personel Gecmisi", "Oyuncu ID'si veya tam ismi:", "Goster", "Geri");
-        else ShowPlayerDialog(playerid, D_YONETID, DIALOG_STYLE_INPUT, "Yonetim", "Hedef oyuncunun ID'si veya ismi (cevrimici olmali):", "Devam", "Geri");
+        if(listitem < 0 || listitem >= MAX_LISTITEM) return 1;
+        new code = PList[playerid][listitem];
+        if(code == 1)
+        {
+            if(!HasPerm(playerid, P_RUTBE | P_CIKAR | P_MAAS)) return 1;
+            ShowPlist(playerid);
+        }
+        else if(code == 2)
+        {
+            if(!HasPerm(playerid, P_ISEAL)) return 1;
+            PAct[playerid] = 1;
+            ShowPlayerDialog(playerid, D_YONETID, DIALOG_STYLE_INPUT, "Ise Al", "Ise alinacak oyuncunun ID'si veya ismi (cevrimici olmali):", "Ise Al", "Geri");
+        }
+        else if(code == 3)
+        {
+            if(!HasPerm(playerid, P_ISEAL | P_CIKAR | P_RUTBE | P_MAAS)) return 1;
+            PAct[playerid] = 7;
+            ShowPlayerDialog(playerid, D_YONETID, DIALOG_STYLE_INPUT, "Personel Gecmisi", "Oyuncu ID'si veya tam ismi:", "Goster", "Geri");
+        }
         return 1;
     }
     if(dialogid == D_YONETID)
     {
-        if(!response) { OpenTablet(playerid); return 1; }
-        if(!IsYonetici(playerid) || !buf[0]) return 1;
-        new act = PAct[playerid], t;
-        if(act == 7)
+        if(!response) { ShowYonet(playerid); return 1; }
+        if(!buf[0]) return 1;
+        if(PAct[playerid] == 7)
         {
-            new nm[32], DBResult:r, a[100], b[24], list[2000], l[160];
-            t = ResolveTarget(inputtext);
-            if(t != INVALID_PLAYER_ID) GetPlayerName(t, nm, sizeof nm);
+            if(!HasPerm(playerid, P_ISEAL | P_CIKAR | P_RUTBE | P_MAAS)) return 1;
+            new nm[32], t2 = ResolveTarget(inputtext);
+            if(t2 != INVALID_PLAYER_ID) GetPlayerName(t2, nm, sizeof nm);
             else format(nm, sizeof nm, "%s", buf);
-            Esc(nm);
-            list[0] = 0;
-            format(q, sizeof q, "SELECT olay,tarih FROM gecmis WHERE dep=%d AND isim='%s' ORDER BY id DESC LIMIT 15", d, nm);
-            r = db_query(gDB, q);
-            if(r)
-            {
-                if(db_num_rows(r))
-                {
-                    do
-                    {
-                        db_get_field(r, 0, a, sizeof a);
-                        db_get_field(r, 1, b, sizeof b);
-                        format(l, sizeof l, "{AAAAAA}[%s] {FFFFFF}%s\n", b, a);
-                        strcat(list, l, sizeof list);
-                    }
-                    while(db_next_row(r));
-                }
-                db_free_result(r);
-            }
-            if(!list[0]) format(list, sizeof list, "Kayit bulunamadi.");
-            format(s, sizeof s, "Personel Gecmisi: %s", nm);
-            ShowBack(playerid, DIALOG_STYLE_MSGBOX, s, list);
+            ShowHistory(playerid, nm);
             return 1;
         }
-        t = ResolveTarget(inputtext);
+        if(!HasPerm(playerid, P_ISEAL)) return 1;
+        new t = ResolveTarget(inputtext);
         if(t == INVALID_PLAYER_ID) { SendClientMessage(playerid, C_ERR, "Oyuncu bulunamadi."); return 1; }
-        if(act == 1)
+        if(PDep[t] >= 0)
         {
-            if(PDep[t] >= 0) { SendClientMessage(playerid, C_ERR, "Oyuncu zaten bir departmanda."); return 1; }
-            SetMember(t, d, 1);
-            SendClientMessage(playerid, C_OK, "Oyuncu departmana alindi.");
+            format(s, sizeof s, "Oyuncu zaten %s icinde. Bir kisi ayni anda en fazla 1 departman/cetede olabilir.", DepName[PDep[t]]);
+            SendLong(playerid, C_ERR, s);
             return 1;
         }
-        if(PDep[t] != d) { SendClientMessage(playerid, C_ERR, "Oyuncu senin departmanindan degil."); return 1; }
-        if(t == playerid || PRank[t] >= PRank[playerid]) { SendClientMessage(playerid, C_ERR, "Kendi rutbenle esit veya ustu birine islem yapamazsin."); return 1; }
-        PTarget[playerid] = t;
-        switch(act)
+        SetMember(t, d, 1);
+        SendClientMessage(playerid, C_OK, "Oyuncu ise alindi.");
+        return 1;
+    }
+    if(dialogid == D_PLIST)
+    {
+        if(!response) { ShowYonet(playerid); return 1; }
+        if(!HasPerm(playerid, P_RUTBE | P_CIKAR | P_MAAS)) return 1;
+        new nm[32];
+        if(!GetMemberByIndex(d, listitem, nm, sizeof nm)) return 1;
+        format(PTmpStr[playerid], 128, "%s", nm);
+        ShowPact(playerid);
+        return 1;
+    }
+    if(dialogid == D_PACT)
+    {
+        if(!response) { ShowPlist(playerid); return 1; }
+        if(listitem < 0 || listitem >= MAX_LISTITEM) return 1;
+        new code = PList[playerid][listitem], nm[32], tr;
+        format(nm, sizeof nm, "%s", PTmpStr[playerid]);
+        tr = GetMemberRank(nm, d);
+        if(tr < 1 || code == 0) return 1;
+        if(code == 6) { ShowHistory(playerid, nm); return 1; }
+        if(!CanManage(playerid, tr, nm)) { SendClientMessage(playerid, C_ERR, "Bu kisiye islem yapamazsin."); return 1; }
+        switch(code)
         {
-            case 2:
+            case 1:
             {
-                LeaveDept(t);
-                SendClientMessage(playerid, C_OK, "Oyuncu departmandan cikarildi.");
-            }
-            case 3:
-            {
-                new l[160], mx = PRank[playerid] - 1;
-                if(mx > MAX_RANK - 1) mx = MAX_RANK - 1;
-                l[0] = 0;
+                if(!HasPerm(playerid, P_RUTBE)) return 1;
+                new mx = MaxAssignable(playerid), rl[400];
+                if(mx > RankCnt[d]) mx = RankCnt[d];
+                if(mx < 1) { SendClientMessage(playerid, C_ERR, "Verebilecegin rutbe yok."); return 1; }
+                rl[0] = 0;
                 for(new r = 0; r < mx; r++)
                 {
                     format(s, sizeof s, "%d) %s\n", r + 1, RankName[d][r]);
-                    strcat(l, s, sizeof l);
+                    strcat(rl, s, sizeof rl);
                 }
-                ShowPlayerDialog(playerid, D_YONETRANK, DIALOG_STYLE_LIST, "Rutbe Sec", l, "Ver", "Iptal");
+                ShowPlayerDialog(playerid, D_YONETRANK, DIALOG_STYLE_LIST, "Rutbe Sec", rl, "Ver", "Iptal");
+            }
+            case 2:
+            {
+                if(!HasPerm(playerid, P_RUTBE)) return 1;
+                if(tr + 1 > MaxAssignable(playerid) || tr + 1 > RankCnt[d]) { SendClientMessage(playerid, C_ERR, "Bu kisiyi daha fazla terfi ettiremezsin."); return 1; }
+                SetRankByName(nm, d, tr + 1);
+                SendClientMessage(playerid, C_OK, "Terfi verildi.");
+                ShowPlist(playerid);
+            }
+            case 3:
+            {
+                if(!HasPerm(playerid, P_RUTBE)) return 1;
+                if(tr <= 1) { SendClientMessage(playerid, C_ERR, "Zaten en alt rutbede."); return 1; }
+                SetRankByName(nm, d, tr - 1);
+                SendClientMessage(playerid, C_OK, "Rutbe dusuruldu.");
+                ShowPlist(playerid);
             }
             case 4:
             {
-                if(PRank[t] + 1 >= PRank[playerid]) { SendClientMessage(playerid, C_ERR, "Bu oyuncuyu daha fazla terfi ettiremezsin."); return 1; }
-                SetRank(t, PRank[t] + 1);
-                SendClientMessage(playerid, C_OK, "Oyuncu terfi ettirildi.");
+                if(!HasPerm(playerid, P_MAAS)) return 1;
+                ShowPlayerDialog(playerid, D_YONETMAAS, DIALOG_STYLE_INPUT, "Maas Belirle", "Yeni maas miktari (0 - 50000):", "Kaydet", "Iptal");
             }
             case 5:
             {
-                SetRank(t, 1);
-                SendClientMessage(playerid, C_OK, "Oyuncu gorevden alindi (Rutbe 1).");
+                if(!HasPerm(playerid, P_CIKAR)) return 1;
+                RemoveByName(nm, d);
+                SendClientMessage(playerid, C_OK, "Personel isten cikarildi.");
+                ShowPlist(playerid);
             }
-            case 6: ShowPlayerDialog(playerid, D_YONETMAAS, DIALOG_STYLE_INPUT, "Maas Belirle", "Yeni maas miktari (0 - 50000):", "Kaydet", "Iptal");
         }
         return 1;
     }
     if(dialogid == D_YONETRANK)
     {
-        if(!response || !IsYonetici(playerid)) return 1;
-        new t = PTarget[playerid], nr = listitem + 1;
-        if(!IsPlayerConnected(t) || PDep[t] != d || PRank[t] >= PRank[playerid] || nr >= PRank[playerid] || nr > MAX_RANK - 1) return 1;
-        SetRank(t, nr);
+        if(!response) { ShowPact(playerid); return 1; }
+        if(!HasPerm(playerid, P_RUTBE)) return 1;
+        new nm[32], tr, nr = listitem + 1;
+        format(nm, sizeof nm, "%s", PTmpStr[playerid]);
+        tr = GetMemberRank(nm, d);
+        if(tr < 1 || !CanManage(playerid, tr, nm) || nr > MaxAssignable(playerid) || nr > RankCnt[d]) return 1;
+        SetRankByName(nm, d, nr);
         SendClientMessage(playerid, C_OK, "Rutbe verildi.");
+        ShowPlist(playerid);
         return 1;
     }
     if(dialogid == D_YONETMAAS)
     {
-        if(!response || !IsYonetici(playerid)) return 1;
-        new t = PTarget[playerid], m = strval(buf);
-        if(!IsPlayerConnected(t) || PDep[t] != d || PRank[t] >= PRank[playerid]) return 1;
+        if(!response) { ShowPact(playerid); return 1; }
+        if(!HasPerm(playerid, P_MAAS)) return 1;
+        new nm[32], tr, m = strval(buf);
+        format(nm, sizeof nm, "%s", PTmpStr[playerid]);
+        tr = GetMemberRank(nm, d);
+        if(tr < 1 || !CanManage(playerid, tr, nm)) return 1;
         if(m < 0 || m > 50000) { SendClientMessage(playerid, C_ERR, "Maas 0 ile 50000 arasinda olmali."); return 1; }
-        PMaas[t] = m;
-        UpdateMember(t);
-        GetPlayerName(t, n, sizeof n);
-        format(s, sizeof s, "Maas belirlendi: $%d", m);
-        AddHistory(d, n, s);
-        ShowPanel(t);
+        SetMaasByName(nm, d, m);
         SendClientMessage(playerid, C_OK, "Maas guncellendi.");
-        SendClientMessage(t, C_INF, "Maasin guncellendi.");
+        ShowPlist(playerid);
+        return 1;
+    }
+
+    // ---------------- Alim yonetimi ----------------
+    if(dialogid == D_ALIM)
+    {
+        if(!response) { OpenTablet(playerid); return 1; }
+        if(!HasPerm(playerid, P_ALIM)) return 1;
+        if(listitem == 0)
+        {
+            SetAlim(d, DepAlim[d] ? 0 : 1);
+            ShowAlim(playerid);
+        }
+        else ShowPlayerDialog(playerid, D_ALIMLVL, DIALOG_STYLE_INPUT, "Minimum Seviye", "Katilmak icin gereken minimum seviye (1 - 999):", "Kaydet", "Geri");
+        return 1;
+    }
+    if(dialogid == D_ALIMLVL)
+    {
+        if(!response) { ShowAlim(playerid); return 1; }
+        if(!HasPerm(playerid, P_ALIM)) return 1;
+        new m = strval(buf);
+        if(m < 1 || m > 999) { SendClientMessage(playerid, C_ERR, "Seviye 1 ile 999 arasinda olmali."); return 1; }
+        DepMinLvl[d] = m;
+        format(q, sizeof q, "UPDATE depayar SET minlvl=%d WHERE dep=%d", m, d);
+        DbExec(q);
+        format(s, sizeof s, "Minimum seviye %d olarak ayarlandi.", m);
+        SendClientMessage(playerid, C_OK, s);
+        ShowAlim(playerid);
+        return 1;
+    }
+
+    // ---------------- Ayrilma ----------------
+    if(dialogid == D_AYRIL)
+    {
+        if(response) LeaveDept(playerid);
+        else OpenTablet(playerid);
+        return 1;
+    }
+
+    // ---------------- Rutbe & yetki ayarlari (sadece admin) ----------------
+    if(dialogid == D_ROLES)
+    {
+        if(!response) { OpenTablet(playerid); return 1; }
+        if(!IsAdm(playerid)) return 1;
+        if(listitem >= 0 && listitem < RankCnt[d])
+        {
+            PTmp[playerid] = listitem;
+            ShowRoleAct(playerid);
+        }
+        else if(listitem == RankCnt[d])
+        {
+            if(RankCnt[d] >= MAX_RANK) { SendClientMessage(playerid, C_ERR, "En fazla 10 rutbe olabilir."); ShowRoller(playerid); return 1; }
+            ShowPlayerDialog(playerid, D_ROLENEW, DIALOG_STYLE_INPUT, "Yeni Rutbe", "Yeni rutbenin adi (en alt rutbe olarak eklenir):", "Ekle", "Geri");
+        }
+        return 1;
+    }
+    if(dialogid == D_ROLEACT)
+    {
+        if(!response) { ShowRoller(playerid); return 1; }
+        if(!IsAdm(playerid)) return 1;
+        new ri = PTmp[playerid];
+        if(ri < 0 || ri >= RankCnt[d]) return 1;
+        if(listitem == 0) ShowPlayerDialog(playerid, D_ROLENAME, DIALOG_STYLE_INPUT, "Rutbe Ismi", "Yeni isim (en fazla 20 karakter):", "Kaydet", "Geri");
+        else if(listitem == 1) ShowRolePerm(playerid);
+        else
+        {
+            if(RankDelete(d, ri)) SendClientMessage(playerid, C_OK, "Rutbe silindi, uyeler bir alt rutbeye alindi.");
+            else SendClientMessage(playerid, C_ERR, "Bu rutbe silinemez (lider rutbesi silinemez, en az 2 rutbe kalmali).");
+            ShowRoller(playerid);
+        }
+        return 1;
+    }
+    if(dialogid == D_ROLENAME)
+    {
+        if(!response) { ShowRoleAct(playerid); return 1; }
+        if(!IsAdm(playerid)) return 1;
+        new ri = PTmp[playerid];
+        if(ri < 0 || ri >= RankCnt[d]) return 1;
+        if(!buf[0] || strlen(buf) > 20) { SendClientMessage(playerid, C_ERR, "Isim 1-20 karakter olmali."); return 1; }
+        format(RankName[d][ri], 24, "%s", buf);
+        SaveRoles(d);
+        SendClientMessage(playerid, C_OK, "Rutbe ismi guncellendi.");
+        ShowRoleAct(playerid);
+        return 1;
+    }
+    if(dialogid == D_ROLEPERM)
+    {
+        if(!response) { ShowRoleAct(playerid); return 1; }
+        if(!IsAdm(playerid)) return 1;
+        new ri = PTmp[playerid];
+        if(ri < 0 || ri >= RankCnt[d] || listitem < 0 || listitem >= PERM_COUNT) return 1;
+        RankPerm[d][ri] ^= (1 << listitem);
+        SaveRoles(d);
+        ShowRolePerm(playerid);
+        return 1;
+    }
+    if(dialogid == D_ROLENEW)
+    {
+        if(!response) { ShowRoller(playerid); return 1; }
+        if(!IsAdm(playerid)) return 1;
+        if(!buf[0] || strlen(buf) > 20) { SendClientMessage(playerid, C_ERR, "Isim 1-20 karakter olmali."); return 1; }
+        if(RankAddBottom(d, buf)) SendClientMessage(playerid, C_OK, "Yeni rutbe eklendi (en alt rutbe). Yetkilerini 'Yetkileri Duzenle'den ayarla.");
+        else SendClientMessage(playerid, C_ERR, "Rutbe eklenemedi (en fazla 10).");
+        ShowRoller(playerid);
         return 1;
     }
 
@@ -1910,7 +2806,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     if(dialogid == D_HONAY)
     {
         if(!response) { OpenTablet(playerid); return 1; }
-        if(!IsYonetici(playerid) || d != 4 || listitem < 0 || listitem >= MAX_LISTITEM) return 1;
+        if(!HasPerm(playerid, P_MEDYA) || d != 4 || listitem < 0 || listitem >= MAX_LISTITEM) return 1;
         new id = PList[playerid][listitem];
         if(id <= 0) return 1;
         PTmp[playerid] = id;
@@ -1920,7 +2816,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     }
     if(dialogid == D_HONAYACT)
     {
-        if(!IsYonetici(playerid) || d != 4) return 1;
+        if(!HasPerm(playerid, P_MEDYA) || d != 4) return 1;
         new id = PTmp[playerid], DBResult:r, bs[70], tf[8];
         if(response)
         {
@@ -1955,7 +2851,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         new id = PList[playerid][listitem];
         if(id <= 0) return 1;
         PTmp[playerid] = id;
-        if(IsYonetici(playerid))
+        if(HasPerm(playerid, P_MEDYA))
             ShowPlayerDialog(playerid, D_HGECACT, DIALOG_STYLE_LIST, "Haber Islemleri", "Haberi Goruntule\nBasligi Duzenle\nHaberi Kaldir", "Sec", "Geri");
         else
         {
@@ -1967,7 +2863,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     if(dialogid == D_HGECACT)
     {
         if(!response) { OpenTablet(playerid); return 1; }
-        if(!IsYonetici(playerid) || d != 4) return 1;
+        if(!HasPerm(playerid, P_MEDYA) || d != 4) return 1;
         new id = PTmp[playerid];
         if(listitem == 0)
         {
@@ -1987,7 +2883,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     if(dialogid == D_HEDIT)
     {
         if(!response) { OpenTablet(playerid); return 1; }
-        if(!IsYonetici(playerid) || d != 4 || !buf[0]) return 1;
+        if(!HasPerm(playerid, P_MEDYA) || d != 4 || !buf[0]) return 1;
         format(q, sizeof q, "UPDATE haberler SET baslik='%s' WHERE id=%d", buf, PTmp[playerid]);
         DbExec(q);
         SendClientMessage(playerid, C_OK, "Baslik guncellendi.");
