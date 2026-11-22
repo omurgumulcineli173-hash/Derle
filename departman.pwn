@@ -96,6 +96,7 @@ enum
 //  GECIKMELI DIALOG (mobil/SAMP Unity: OnDialogResponse icinde hemen
 //  acilan yeni dialog gorunmuyor -> kisa gecikmeyle ac)
 // ------------------------------------------------------------------
+#define DEBUG_DEP 1   // sorun cozulunce 0 yap
 new bool:gInDlg[MAX_PLAYERS];
 
 forward DlgGoster(playerid, dialogid, style, cap[], info[], b1[], b2[]);
@@ -2222,6 +2223,10 @@ stock DepDialogResp(playerid, dialogid, response, listitem, inputtext[])
     {
         if(!response || listitem < 0 || listitem >= MAX_TABITEM) return 1;
         new act = PTab[playerid][listitem];
+        #if DEBUG_DEP
+        format(s, sizeof s, "[DEBUG] act=%d izin=%d", act, ActAllowed(playerid, act));
+        SendClientMessage(playerid, 0xFFFF00FF, s);
+        #endif
         if(act == 0 || !ActAllowed(playerid, act)) return 1;
 
         if(act >= ACT_REC && act < ACT_REC + 6)
@@ -2917,6 +2922,11 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 {
     if(dialogid < D_NONE || dialogid > D_ROLENEW) return 0;
     gInDlg[playerid] = true;
+    #if DEBUG_DEP
+    new dbg[96];
+    format(dbg, sizeof dbg, "[DEBUG] dialog=%d resp=%d item=%d dep=%d", dialogid, response, listitem, PDep[playerid]);
+    SendClientMessage(playerid, 0xFFFF00FF, dbg);
+    #endif
     new r = DepDialogResp(playerid, dialogid, response, listitem, inputtext);
     gInDlg[playerid] = false;
     return r;
