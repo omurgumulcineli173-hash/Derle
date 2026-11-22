@@ -93,6 +93,27 @@ enum
 }
 
 // ------------------------------------------------------------------
+//  GECIKMELI DIALOG (mobil/SAMP Unity: OnDialogResponse icinde hemen
+//  acilan yeni dialog gorunmuyor -> kisa gecikmeyle ac)
+// ------------------------------------------------------------------
+new bool:gInDlg[MAX_PLAYERS];
+
+forward DlgGoster(playerid, dialogid, style, cap[], info[], b1[], b2[]);
+public DlgGoster(playerid, dialogid, style, cap[], info[], b1[], b2[])
+{
+    if(!IsPlayerConnected(playerid)) return 0;
+    return ShowPlayerDialog(playerid, dialogid, style, cap, info, b1, b2);
+}
+
+stock SafeDialog(playerid, dialogid, style, cap[], info[], b1[], b2[])
+{
+    if(!gInDlg[playerid]) return ShowPlayerDialog(playerid, dialogid, style, cap, info, b1, b2);
+    SetTimerEx("DlgGoster", 150, false, "iiissss", playerid, dialogid, style, cap, info, b1, b2);
+    return 1;
+}
+#define ShowPlayerDialog SafeDialog
+
+// ------------------------------------------------------------------
 //  DEPARTMAN VERILERI
 // ------------------------------------------------------------------
 new DepName[MAX_DEP][24] = {"Belediye", "FBI", "Polis (LSPD)", "Hastane (EMS)", "Medya (NEWS)", "Los Namados", "Liberty", "Inferno", "Vipers"};
@@ -2106,7 +2127,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 // ==================================================================
 //  DIALOG CEVAPLARI
 // ==================================================================
-public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
+stock DepDialogResp(playerid, dialogid, response, listitem, inputtext[])
 {
     if(dialogid < D_NONE || dialogid > D_ROLENEW) return 0;
 
@@ -2890,4 +2911,13 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         return 1;
     }
     return 1;
+}
+
+public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
+{
+    if(dialogid < D_NONE || dialogid > D_ROLENEW) return 0;
+    gInDlg[playerid] = true;
+    new r = DepDialogResp(playerid, dialogid, response, listitem, inputtext);
+    gInDlg[playerid] = false;
+    return r;
 }
